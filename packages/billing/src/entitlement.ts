@@ -1,5 +1,13 @@
 import type { Subscription } from './types.js'
 
+// クライアント（ブラウザ）からは、このモジュールだけを import すれば
+// 権利判定と関連型が揃うようにする（ルートは Node 専用の crypto を含むため）
+export type {
+  Subscription,
+  SubscriptionSource,
+  SubscriptionStatus,
+} from './types.js'
+
 // Firestore から読み出した日時は Timestamp 型になるため、
 // Date と Timestamp（toDate を持つオブジェクト）の両方を受け付ける
 type DateLike = Date | { toDate: () => Date }
