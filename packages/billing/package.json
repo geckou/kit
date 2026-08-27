@@ -2,7 +2,7 @@
   "name": "@geckou/billing",
   "version": "0.1.1",
   "description": "Subscription entitlement and webhook handling (Stripe / RevenueCat) for Firebase-based projects",
-  "type": "module",
+  "type": "commonjs",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -53,5 +53,12 @@
   "devDependencies": {
     "firebase-admin": "^13.0.0",
     "stripe": "^18.0.0"
+  },
+  "typesVersions": {
+    "*": {
+      "entitlement": [
+        "dist/entitlement.d.ts"
+      ]
+    }
   }
 }
