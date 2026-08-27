@@ -13,7 +13,7 @@ UI コンポーネントは [`geckou/ui`](https://github.com/geckou/ui)（`@geck
 
 | パッケージ | 内容 | 状態 |
 | --- | --- | --- |
-| `@geckou/billing` | Stripe / RevenueCat のサブスク権利判定・Webhook 処理 | 準備中 |
+| [`@geckou/billing`](packages/billing) | Stripe / RevenueCat のサブスク権利判定・Webhook 処理 | 公開済み |
 
 ## 設計方針
 
