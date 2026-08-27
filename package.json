@@ -1,0 +1,29 @@
+{
+  "name": "@geckou/kit-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Geckou Kit — shared server/client packages for Firebase-based projects",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/geckou/kit.git"
+  },
+  "author": "geckou-shogo <shogo.nojima@geckou.net>",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "yarn workspaces run build",
+    "test": "yarn workspaces run test",
+    "type-check": "yarn workspaces run type-check",
+    "release": "bash scripts/release.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.11"
+  }
+}

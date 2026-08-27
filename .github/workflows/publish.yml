@@ -1,0 +1,57 @@
+name: Publish package
+
+# geckou/ui と同じタグ駆動。<パッケージのディレクトリ名>@<バージョン>（例: billing@0.1.0）
+on:
+  push:
+    tags: ['*@*']
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 公開するパッケージのディレクトリ名（billing 等）
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve target package
+        id: target
+        env:
+          INPUT_PACKAGE: ${{ github.event.inputs.package }}
+        run: |
+          if [ -n "$INPUT_PACKAGE" ]; then
+            PACKAGE="$INPUT_PACKAGE"
+          else
+            PACKAGE="${GITHUB_REF_NAME%@*}"
+          fi
+
+          if [ ! -f "packages/$PACKAGE/package.json" ]; then
+            echo "packages/$PACKAGE が存在しません（tag: $GITHUB_REF_NAME）" >&2
+            exit 1
+          fi
+
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: yarn
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # 依存パッケージが先にビルドされている必要がある
+      - name: Build all packages
+        run: yarn build
+
+      - name: Publish to npm
+        run: npm publish --access public
+        working-directory: packages/${{ steps.target.outputs.package }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
