@@ -1,8 +1,46 @@
 import type { Auth } from 'firebase-admin/auth'
 import type { Firestore } from 'firebase-admin/firestore'
-import type Stripe from 'stripe'
 
 import type { Subscription } from './types.js'
+
+/**
+ * Stripe クライアントに要求する形。
+ *
+ * `stripe` の型を直接使うと、メジャーバージョン間の型定義の差
+ * （v22 で CJS が `export = StripeConstructor` に変わった等）が
+ * 利用側の型エラーになるため、使用するメソッドだけを構造的に要求する。
+ * `new Stripe(secretKey)` のインスタンスはどのメジャーでもこの形を満たす。
+ */
+export type StripeClientLike = {
+  webhooks: {
+    constructEvent(
+      payload: string | Buffer,
+      header: string,
+      secret: string
+    ): unknown
+  }
+  customers: {
+    create(params: {
+      email?: string
+      metadata: Record<string, string>
+    }): Promise<{ id: string }>
+  }
+  checkout: {
+    sessions: {
+      create(
+        params: Record<string, unknown>
+      ): Promise<{ url?: string | null }>
+    }
+  }
+  billingPortal: {
+    sessions: {
+      create(params: {
+        customer: string
+        return_url: string
+      }): Promise<{ url: string }>
+    }
+  }
+}
 
 /**
  * createBilling に渡す設定。
@@ -44,7 +82,7 @@ export type BillingConfig = {
   /** Web 決済（Stripe）を使う場合のみ設定する */
   stripe?: {
     /** new Stripe(secretKey) で生成したクライアント */
-    client: Stripe
+    client: StripeClientLike
     /** Webhook 署名検証用シークレット */
     webhookSecret: string
     /**

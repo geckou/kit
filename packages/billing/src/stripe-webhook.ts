@@ -62,11 +62,13 @@ export async function handleStripeWebhook(
   // 署名検証には生のリクエストボディが必要（パース前の rawBody を渡すこと）
   let event: Stripe.Event
   try {
+    // 署名検証は client に委譲する。戻り値の型は StripeClientLike が
+    // バージョン差を吸収するため unknown で返るので、ここで確定させる
     event = stripe.webhooks.constructEvent(
       req.rawBody,
       signature,
       webhookSecret
-    )
+    ) as Stripe.Event
   } catch (error) {
     console.error('Stripe webhook signature verification failed', error)
     return { status: 400, body: { error: 'Invalid signature' } }
