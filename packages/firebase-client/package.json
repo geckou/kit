@@ -1,0 +1,64 @@
+{
+  "name": "@geckou/firebase-client",
+  "version": "0.1.0",
+  "description": "Firebase client SDK wrappers (app init / Firestore CRUD / Storage) for web and React Native",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./firestore": {
+      "types": "./dist/firestore.d.ts",
+      "default": "./dist/firestore.js"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.ts",
+      "default": "./dist/storage.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/geckou/kit.git",
+    "directory": "packages/firebase-client"
+  },
+  "author": "geckou-shogo <shogo.nojima@geckou.net>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "firebase": ">=11.0.0"
+  },
+  "devDependencies": {
+    "firebase": "^11.0.0"
+  },
+  "typesVersions": {
+    "*": {
+      "firestore": [
+        "dist/firestore.d.ts"
+      ],
+      "storage": [
+        "dist/storage.d.ts"
+      ]
+    }
+  }
+}
