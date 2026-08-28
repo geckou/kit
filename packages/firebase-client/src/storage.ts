@@ -49,14 +49,25 @@ export async function uploadFile(
           onProgress({
             bytesTransferred: snapshot.bytesTransferred,
             totalBytes: snapshot.totalBytes,
-            progress: (snapshot.bytesTransferred / snapshot.totalBytes) * 100,
+            // 0 バイトのファイルは totalBytes が 0 になり 0/0 = NaN になる。
+            // 転送するものが無い＝完了とみなして 100 を返す
+            progress:
+              snapshot.totalBytes > 0
+                ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+                : 100,
           })
         }
       },
       (error) => reject(error),
       async () => {
-        const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref)
-        resolve({ downloadUrl, path })
+        // getDownloadURL の失敗をここで捕まえないと、この async コールバックの
+        // rejection が外へ伝わらず Promise が永久に pending になる
+        try {
+          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref)
+          resolve({ downloadUrl, path })
+        } catch (error) {
+          reject(error)
+        }
       }
     )
   })

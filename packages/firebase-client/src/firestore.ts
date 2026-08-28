@@ -63,7 +63,7 @@ export async function getDocument<T>(
 
     return {
       success: true,
-      data: { id: snapshot.id, ...snapshot.data() } as T,
+      data: { ...snapshot.data(), id: snapshot.id } as T,
     }
   } catch (error) {
     return {
@@ -107,7 +107,7 @@ export async function queryDocuments<T>(
     const q = query(collection(db, collectionName), ...constraints)
     const snapshot = await getDocs(q)
 
-    const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as T)
+    const items = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as T)
 
     const lastDoc =
       snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null
@@ -237,7 +237,7 @@ export function subscribeCollection<T>(
   return onSnapshot(
     q,
     (snapshot: QuerySnapshot) => {
-      const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as T)
+      const items = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as T)
       onData(items)
     },
     (error) => {
@@ -266,7 +266,7 @@ export function subscribeDocument<T>(
     docRef,
     (snapshot: DocumentSnapshot) => {
       if (snapshot.exists()) {
-        onData({ id: snapshot.id, ...snapshot.data() } as T)
+        onData({ ...snapshot.data(), id: snapshot.id } as T)
       } else {
         onData(null)
       }

@@ -66,6 +66,9 @@ if (result.success) {
 
 書き込み・取得系は例外を投げず、`{ success: true, data }` / `{ success: false, error }` を返す。
 
+取得・購読が返す `id` は**常に Firestore のドキュメント ID**。ドキュメント本文に `id`
+フィールドを持たせている場合でも、そちらでは上書きされない。
+
 | 関数 | 用途 |
 | --- | --- |
 | `getDocument` | 1件取得（存在しなければ `data: null`） |
@@ -95,3 +98,5 @@ const { downloadUrl, path } = await uploadFile(
 
 `uploadFile` / `deleteFile` / `getFileUrl` / `getFirebaseStorage` を提供する。
 アップロードは `uploadBytesResumable` を使い、`progress` は 0〜100 のパーセント。
+0 バイトのファイルは転送するものが無いため `progress: 100` を通知する。
+アップロード自体の失敗と、完了後の URL 取得の失敗は、どちらも reject される。

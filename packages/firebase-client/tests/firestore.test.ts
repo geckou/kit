@@ -78,6 +78,21 @@ describe('getDocument', () => {
     expect(sdk.doc).toHaveBeenCalledWith(db, 'posts', 'abc')
   })
 
+  it('データ側の id フィールドでドキュメント ID を上書きしない', async () => {
+    // ドキュメント本文に id を持たせている設計は珍しくない。
+    // その値が Firestore のドキュメント ID を潰すと、以降の参照が壊れる
+    sdk.getDoc.mockResolvedValue(
+      snapshot('real-doc-id', { id: 'データ側の id', title: 'hello' })
+    )
+
+    const result = await getDocument(db, 'posts', 'real-doc-id')
+
+    expect(result).toEqual({
+      success: true,
+      data: { id: 'real-doc-id', title: 'hello' },
+    })
+  })
+
   it('例外は success: false とメッセージに変換する（throw しない）', async () => {
     sdk.getDoc.mockRejectedValue(new Error('permission denied'))
 
@@ -148,6 +163,18 @@ describe('queryDocuments', () => {
         lastDoc: docs[1],
       },
     })
+  })
+
+  it('データ側の id フィールドでドキュメント ID を上書きしない', async () => {
+    sdk.getDocs.mockResolvedValue({
+      docs: [snapshot('real-a', { id: 'データ側', n: 1 })],
+    })
+
+    const result = await queryDocuments<{ id: string; n: number }>(db, 'posts')
+
+    expect(result.success && result.data.items).toEqual([
+      { id: 'real-a', n: 1 },
+    ])
   })
 
   it('0 件なら lastDoc は null', async () => {
@@ -236,6 +263,18 @@ describe('subscribeCollection', () => {
     expect(result).toBe(unsubscribe)
   })
 
+  it('データ側の id フィールドでドキュメント ID を上書きしない', () => {
+    sdk.onSnapshot.mockImplementation((_q, onNext) => {
+      onNext({ docs: [snapshot('real-a', { id: 'データ側', n: 1 })] })
+      return vi.fn()
+    })
+    const onData = vi.fn()
+
+    subscribeCollection(db, 'posts', {}, onData)
+
+    expect(onData).toHaveBeenCalledWith([{ id: 'real-a', n: 1 }])
+  })
+
   it('カーソルは購読では使わない（startAfter を呼ばない）', () => {
     sdk.onSnapshot.mockReturnValue(vi.fn())
 
@@ -284,5 +323,17 @@ describe('subscribeDocument', () => {
     subscribeDocument(db, 'posts', 'a', (data) => received.push(data))
 
     expect(received).toEqual([{ id: 'a', n: 1 }, null])
+  })
+
+  it('データ側の id フィールドでドキュメント ID を上書きしない', () => {
+    const received: unknown[] = []
+    sdk.onSnapshot.mockImplementation((_ref, onNext) => {
+      onNext(snapshot('real-a', { id: 'データ側', n: 1 }))
+      return vi.fn()
+    })
+
+    subscribeDocument(db, 'posts', 'real-a', (data) => received.push(data))
+
+    expect(received).toEqual([{ id: 'real-a', n: 1 }])
   })
 })

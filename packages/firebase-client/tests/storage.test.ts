@@ -100,6 +100,25 @@ describe('uploadFile', () => {
     })
   })
 
+  it('0 バイトのファイルでも進捗が NaN にならない', async () => {
+    const task = uploadTask()
+    sdk.uploadBytesResumable.mockReturnValue(task)
+    sdk.getDownloadURL.mockResolvedValue('https://example.com/f.png')
+    const onProgress = vi.fn()
+
+    const promise = uploadFile(app, 'empty.txt', new Uint8Array(), onProgress)
+    task.handlers.onStateChanged?.({ bytesTransferred: 0, totalBytes: 0 })
+    await task.handlers.onComplete?.()
+    await promise
+
+    // 転送するものが無い＝完了として 100。README が保証する 0〜100 を外れない
+    expect(onProgress).toHaveBeenCalledWith({
+      bytesTransferred: 0,
+      totalBytes: 0,
+      progress: 100,
+    })
+  })
+
   it('onProgress を渡さなくても進捗通知で落ちない', async () => {
     const task = uploadTask()
     sdk.uploadBytesResumable.mockReturnValue(task)
@@ -121,6 +140,17 @@ describe('uploadFile', () => {
     task.handlers.onError?.(new Error('quota exceeded'))
 
     await expect(promise).rejects.toThrow('quota exceeded')
+  })
+
+  it('URL 取得に失敗したら reject する（pending のままにしない）', async () => {
+    const task = uploadTask()
+    sdk.uploadBytesResumable.mockReturnValue(task)
+    sdk.getDownloadURL.mockRejectedValue(new Error('object not found'))
+
+    const promise = uploadFile(app, 'images/f.png', new Uint8Array([1]))
+    await task.handlers.onComplete?.()
+
+    await expect(promise).rejects.toThrow('object not found')
   })
 })
 
