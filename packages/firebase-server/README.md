@@ -29,6 +29,8 @@ export const requireAuth = createRequireAuth(getAuth)
 ```
 
 ```ts
+import type { Request } from 'express'
+
 app.get('/me', requireAuth, (req, res) => {
   // 検証に成功すると req.uid に uid が入る
   const { uid } = req as Request & { uid: string }
