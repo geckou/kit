@@ -14,7 +14,8 @@ UI コンポーネントは [`geckou/ui`](https://github.com/geckou/ui)（`@geck
 | パッケージ | 内容 | 状態 |
 | --- | --- | --- |
 | [`@geckou/billing`](packages/billing) | Stripe / RevenueCat のサブスク権利判定・Webhook 処理 | 公開済み |
-| [`@geckou/firebase-client`](packages/firebase-client) | Firebase クライアント SDK のラッパー（初期化 / Firestore / Storage） | 未公開 |
+| [`@geckou/firebase-client`](packages/firebase-client) | Firebase クライアント SDK のラッパー（初期化 / Firestore / Storage） | 公開済み |
+| [`@geckou/firebase-server`](packages/firebase-server) | サーバーサイドの Firebase ヘルパー（認証ミドルウェア / FCM 送信） | 未公開 |
 
 ## 設計方針
 
