@@ -163,6 +163,14 @@ describe('deleteFile / getFileUrl', () => {
     expect(sdk.deleteObject).toHaveBeenCalledWith({ __ref: 'images/f.png' })
   })
 
+  it('deleteFile の失敗はそのまま伝わる', async () => {
+    sdk.deleteObject.mockRejectedValue(new Error('object not found'))
+
+    await expect(deleteFile(app, 'images/f.png')).rejects.toThrow(
+      'object not found'
+    )
+  })
+
   it('getFileUrl はダウンロード URL を返す', async () => {
     sdk.getDownloadURL.mockResolvedValue('https://example.com/f.png')
 
