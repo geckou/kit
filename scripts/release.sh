@@ -42,9 +42,28 @@ esac
 VERSION="$(node -p "require('./$PACKAGE_DIR/package.json').version")"
 TAG="$PACKAGE@$VERSION"
 
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  echo "タグ $TAG は既にローカルに存在します。" >&2
+  exit 1
+fi
+
+if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+  echo "タグ $TAG は既に origin に存在します。" >&2
+  exit 1
+fi
+
+# 新規パッケージの初回リリースでは、package.json が既に目的のバージョンで
+# 差分が出ない。その場合コミットは作らず、現在の HEAD にタグだけ打つ
 git add "$PACKAGE_DIR/package.json"
-git commit -m "chore: $TAG"
+
+if git diff --cached --quiet; then
+  echo "[skip] $PACKAGE_DIR/package.json は既に $VERSION のため、コミットは作成しません"
+else
+  git commit -m "chore: $TAG"
+fi
+
 git tag "$TAG"
 git push origin main "$TAG"
 
 echo "[done] $TAG を push しました。publish ワークフローが npm へ公開します。"
+echo "       既に公開済みのバージョンなら publish はスキップされます。"
