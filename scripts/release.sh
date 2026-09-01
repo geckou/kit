@@ -39,7 +39,9 @@ if [ "$BRANCH" != "production" ]; then
   exit 1
 fi
 
-git fetch --quiet origin production
+# --no-tags: ここではコミットの比較だけが目的。既定設定ではタグも追従フェッチされ、
+# 下のローカルタグ検査を無関係な理由で踏むことがある
+git fetch --quiet --no-tags origin production
 
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
   echo "HEAD が origin/production と一致していません。git pull --ff-only origin production を実行してください。" >&2
@@ -48,7 +50,9 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
   exit 1
 fi
 
-# 打つ前に全部検査する。途中で失敗して一部だけタグが付いた状態を作らないため
+# タグを打つ前に、指定された全パッケージを検査する。入力の不備（存在しない・private・
+# 重複・タグが既にある）で「一部だけ打った」状態になるのを防ぐため。
+# push そのものが途中で失敗した場合（ネットワーク等）は、それまでのタグが残る
 TAGS=()
 
 for PACKAGE in "${PACKAGES[@]}"; do
