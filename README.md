@@ -45,5 +45,34 @@ yarn release <パッケージのディレクトリ名> [patch|minor|major|<versi
 `NPM_TOKEN` を持つジョブ内で実行される）。ワークフローは起動元のコミットがデフォルトブランチに
 含まれること・タグのバージョンが `package.json` の version と一致することを確認してから公開する。
 
-公開には `NPM_TOKEN` シークレットと `npm-publish` Environment が要る。ワークフロー定義ごと
-書き換えた ref からの起動まで塞ぐなら、Environment に承認者かタグ制限（`*@*`）を設定する。
+### 認証（Trusted Publishing）
+
+公開の認証は npm の **Trusted Publishing**（GitHub Actions の OIDC）で行う。
+`NPM_TOKEN` のような長期シークレットは持たない。実行のたびに短命なトークンが
+発行されるので、盗まれて後から悪用される秘密が存在しない。
+
+そのかわり、**npm 側でパッケージごとに Trusted Publisher の登録が要る**。
+npmjs.com のパッケージ設定（Settings → Trusted Publisher）で以下を登録する。
+
+| 項目 | 値 |
+| --- | --- |
+| Provider | GitHub Actions |
+| Organization / Repository | `geckou` / `kit` |
+| Workflow filename | `publish.yml` |
+| Environment | `npm-publish` |
+
+`Workflow filename` は**ファイル名だけ**（`.github/workflows/` のパスは付けない）。
+Organization / Repository / Workflow filename は**大文字小文字まで一致**する必要がある。
+新しいパッケージを足したときは、この登録も 1 回だけ行う。
+
+移行が動くことを確認できたら、パッケージ設定の
+**「Require two-factor authentication and disallow tokens」を有効にする**。
+以後そのパッケージはトークンでは公開できなくなる。**順番を逆にすると公開できなくなる**ので、
+必ず 1 回公開が通ってから有効にする。
+
+npm 側の紐付けは「リポジトリ + ワークフロー」単位なので、どの ref から起動されたかまでは
+npm 側では縛れない。そこは上の `production` 包含チェックと、`npm-publish` Environment の
+「Deployment branches and tags」（タグ `*@*` に限定）で担保している。
+
+公開されたパッケージには provenance（どのコミット・どのワークフローから公開されたかの証明）
+が付く。
