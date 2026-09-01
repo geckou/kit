@@ -34,10 +34,19 @@ UI コンポーネントは [`geckou/ui`](https://github.com/geckou/ui)（`@geck
 [`geckou/ui`](https://github.com/geckou/ui) と同じタグ駆動方式。
 
 ```bash
-yarn release <パッケージのディレクトリ名> [patch|minor|major|<version>]
+# 1. packages/<パッケージ>/package.json の version を上げる PR を出してマージする
+# 2. production でタグを打つ（複数まとめて指定できる）
+git checkout production && git pull --ff-only
+yarn release billing firebase-client firebase-server
 ```
 
 `<ディレクトリ名>@<バージョン>` 形式のタグを push すると `publish.yml` が npm へ公開する。
+
+**`yarn release` はタグを打つだけで、version は上げない。** `production` への直接 push は
+禁止しているため、version の変更は通常の PR で入れる。また **HEAD が `origin/production` と
+一致していなければ止まる** — 手元が古いままタグを打つと、GitHub は「タグが指すコミットの
+ワークフローファイル」で実行するため、古い `publish.yml` が動いて意図しない中身が
+公開されうるため。
 
 **公開できるのはデフォルトブランチに入っているコミットだけ。** タグも手動実行も任意の ref から
 起動できるので、そのままだとレビューを通っていないコードを npm へ出せてしまう
