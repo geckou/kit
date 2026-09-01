@@ -27,12 +27,12 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$BRANCH" != "main" ]; then
-  echo "main ブランチで実行してください（現在: $BRANCH）" >&2
+if [ "$BRANCH" != "production" ]; then
+  echo "production ブランチで実行してください（現在: $BRANCH）" >&2
   exit 1
 fi
 
-git pull --rebase origin main
+git pull --rebase origin production
 
 case "$BUMP" in
   patch|minor|major) (cd "$PACKAGE_DIR" && yarn version "--$BUMP" --no-git-tag-version) ;;
@@ -63,7 +63,7 @@ else
 fi
 
 git tag "$TAG"
-git push origin main "$TAG"
+git push origin production "$TAG"
 
 echo "[done] $TAG を push しました。publish ワークフローが npm へ公開します。"
 echo "       既に公開済みのバージョンなら publish はスキップされます。"
