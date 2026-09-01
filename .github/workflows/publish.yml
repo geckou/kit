@@ -107,8 +107,9 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          # Trusted Publishing は Node >= 22.14.0 を要求する
-          node-version: 22
+          # Trusted Publishing は Node >= 22.14.0 を要求する。範囲で書くのは、
+          # `22` だとランナーのツールキャッシュ次第で 22.14 未満が選ばれうるため
+          node-version: '>=22.14.0'
           cache: yarn
           registry-url: https://registry.npmjs.org/
 
