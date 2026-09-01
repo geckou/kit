@@ -52,20 +52,39 @@ fi
 TAGS=()
 
 for PACKAGE in "${PACKAGES[@]}"; do
-  PACKAGE_DIR="packages/$PACKAGE"
+  # パッケージ名はそのままパスの一部になり、タグ名にもなる。先に形式を検査して、
+  # ../ によるパストラバーサルと、node へ渡す式への注入の余地を消す
+  # （publish.yml の Resolve target package と同じ検査）
+  if [[ ! "$PACKAGE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+    echo "パッケージ名の形式が不正です（ケバブケースのディレクトリ名のみ）: $PACKAGE" >&2
+    exit 1
+  fi
 
-  if [ ! -f "$PACKAGE_DIR/package.json" ]; then
+  PACKAGE_DIR="packages/$PACKAGE"
+  PACKAGE_JSON="$PWD/$PACKAGE_DIR/package.json"
+
+  if [ ! -f "$PACKAGE_JSON" ]; then
     echo "$PACKAGE_DIR が存在しません。" >&2
     exit 1
   fi
 
-  if [ "$(node -p "require('./$PACKAGE_DIR/package.json').private === true")" = "true" ]; then
+  # パスは環境変数で渡す（node の式に文字列として展開しない）
+  if [ "$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).private === true')" = "true" ]; then
     echo "$PACKAGE_DIR は private です（公開対象ではありません）。" >&2
     exit 1
   fi
 
-  VERSION="$(node -p "require('./$PACKAGE_DIR/package.json').version")"
+  VERSION="$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).version')"
   TAG="$PACKAGE@$VERSION"
+
+  # 同じパッケージを 2 回指定されると、1 本目を push した後に 2 本目の git tag が
+  # 失敗して「一部だけタグが付いた」状態になる
+  for EXISTING in ${TAGS[@]+"${TAGS[@]}"}; do
+    if [ "$EXISTING" = "$TAG" ]; then
+      echo "同じパッケージが重複して指定されています: $PACKAGE" >&2
+      exit 1
+    fi
+  done
 
   if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
     echo "タグ $TAG は既にローカルに存在します。version を上げてください。" >&2

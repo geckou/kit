@@ -36,7 +36,7 @@ UI コンポーネントは [`geckou/ui`](https://github.com/geckou/ui)（`@geck
 ```bash
 # 1. packages/<パッケージ>/package.json の version を上げる PR を出してマージする
 # 2. production でタグを打つ（複数まとめて指定できる）
-git checkout production && git pull
+git checkout production && git pull --ff-only
 yarn release billing firebase-client firebase-server
 ```
 
