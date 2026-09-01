@@ -15,7 +15,7 @@ UI コンポーネントは [`geckou/ui`](https://github.com/geckou/ui)（`@geck
 | --- | --- | --- |
 | [`@geckou/billing`](packages/billing) | Stripe / RevenueCat のサブスク権利判定・Webhook 処理 | 公開済み |
 | [`@geckou/firebase-client`](packages/firebase-client) | Firebase クライアント SDK のラッパー（初期化 / Firestore / Storage） | 公開済み |
-| [`@geckou/firebase-server`](packages/firebase-server) | サーバーサイドの Firebase ヘルパー（認証ミドルウェア / FCM 送信） | 未公開 |
+| [`@geckou/firebase-server`](packages/firebase-server) | サーバーサイドの Firebase ヘルパー（認証ミドルウェア / FCM 送信） | 公開済み |
 
 ## 設計方針
 
@@ -42,8 +42,44 @@ yarn release <パッケージのディレクトリ名> [patch|minor|major|<versi
 **公開できるのはデフォルトブランチに入っているコミットだけ。** タグも手動実行も任意の ref から
 起動できるので、そのままだとレビューを通っていないコードを npm へ出せてしまう
 （publish の前に `yarn install` / `yarn build` が走るため、その ref の任意のコードが
-`NPM_TOKEN` を持つジョブ内で実行される）。ワークフローは起動元のコミットがデフォルトブランチに
+公開権限を持つジョブ内で実行される）。ワークフローは起動元のコミットがデフォルトブランチに
 含まれること・タグのバージョンが `package.json` の version と一致することを確認してから公開する。
 
-公開には `NPM_TOKEN` シークレットと `npm-publish` Environment が要る。ワークフロー定義ごと
-書き換えた ref からの起動まで塞ぐなら、Environment に承認者かタグ制限（`*@*`）を設定する。
+### 認証（Trusted Publishing）
+
+公開の認証は npm の **Trusted Publishing**（GitHub Actions の OIDC）で行う。
+`NPM_TOKEN` のような長期シークレットは持たない。実行のたびに短命なトークンが
+発行されるので、盗まれて後から悪用される秘密が存在しない。
+
+そのかわり、**npm 側でパッケージごとに Trusted Publisher の登録が要る**。
+npmjs.com のパッケージ設定（Settings → Trusted Publisher）で以下を登録する。
+
+| 項目 | 値 |
+| --- | --- |
+| Provider | GitHub Actions |
+| Organization / Repository | `geckou` / `kit` |
+| Workflow filename | `publish.yml` |
+| Environment | `npm-publish` |
+
+`Workflow filename` は**ファイル名だけ**（`.github/workflows/` のパスは付けない）。
+Organization / Repository / Workflow filename は**大文字小文字まで一致**する必要がある。
+新しいパッケージを足したときは、この登録も 1 回だけ行う。
+
+移行が動くことを確認できたら、パッケージ設定の
+**「Require two-factor authentication and disallow tokens」を有効にする**。
+以後そのパッケージはトークンでは公開できなくなる。**順番を逆にすると公開できなくなる**ので、
+必ず 1 回公開が通ってから有効にする。
+
+npm 側の紐付けは「リポジトリ + ワークフロー」単位なので、どの ref から起動されたかまでは
+npm 側では縛れない。そこは上の `production` 包含チェックと、`npm-publish` Environment の
+「Deployment branches and tags」で担保している。**許可するのは 2 つ**:
+
+| ref type | パターン | 用途 |
+| --- | --- | --- |
+| Tag | `*@*` | 通常のリリース（`yarn release`） |
+| Branch | `production` | `workflow_dispatch` での公開（初回リリース等） |
+
+**タグだけに限定すると `workflow_dispatch` が Environment 側で弾かれる。**
+
+公開されたパッケージには provenance（どのコミット・どのワークフローから公開されたかの証明）
+が付く。
