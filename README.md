@@ -38,3 +38,12 @@ yarn release <パッケージのディレクトリ名> [patch|minor|major|<versi
 ```
 
 `<ディレクトリ名>@<バージョン>` 形式のタグを push すると `publish.yml` が npm へ公開する。
+
+**公開できるのはデフォルトブランチに入っているコミットだけ。** タグも手動実行も任意の ref から
+起動できるので、そのままだとレビューを通っていないコードを npm へ出せてしまう
+（publish の前に `yarn install` / `yarn build` が走るため、その ref の任意のコードが
+`NPM_TOKEN` を持つジョブ内で実行される）。ワークフローは起動元のコミットがデフォルトブランチに
+含まれること・タグのバージョンが `package.json` の version と一致することを確認してから公開する。
+
+公開には `NPM_TOKEN` シークレットと `npm-publish` Environment が要る。ワークフロー定義ごと
+書き換えた ref からの起動まで塞ぐなら、Environment に承認者かタグ制限（`*@*`）を設定する。

@@ -1,6 +1,17 @@
 name: Publish package
 
 # geckou/ui と同じタグ駆動。<パッケージのディレクトリ名>@<バージョン>（例: billing@0.1.0）
+#
+# **公開できるのは production に入っているコミットだけ。** タグも workflow_dispatch も
+# 任意の ref から起動できるため、そのままだと未マージのブランチをチェックアウトした実行に
+# NPM_TOKEN が渡る。publish の前に yarn install / yarn build が走るので、その ref の
+# 任意のコードがトークンを持つジョブ内で実行されることになる。下の 2 つの検査で塞いでいる。
+#
+#   1. タグ（または dispatch した ref）のコミットが origin/production に含まれること
+#   2. タグのバージョン部分が、対象 package.json の version と一致すること
+#
+# あわせて npm-publish Environment を通す。ワークフロー定義を書き換えた ref からの
+# 起動まで塞ぐなら、リポジトリ設定でこの Environment に承認者かタグ制限（`*@*`）を足す。
 on:
   push:
     tags: ['*@*']
@@ -16,8 +27,25 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm-publish
+
     steps:
       - uses: actions/checkout@v5
+        with:
+          # production との包含関係を見るため、履歴を持ってチェックアウトする
+          fetch-depth: 0
+
+      # レビューを通っていないコミットからの公開を止める。依存インストール（= その ref の
+      # コードの実行）より前に置く。push（タグ）でも workflow_dispatch でも
+      # GITHUB_SHA は起動した ref の先頭を指す
+      - name: Verify the commit is on production
+        run: |
+          git fetch --no-tags --quiet origin production
+
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/production; then
+            echo "::error::${GITHUB_SHA} は origin/production に含まれていません。version を上げる PR をマージしてから、production でタグを打ってください（yarn release <パッケージ>）"
+            exit 1
+          fi
 
       - name: Resolve target package
         id: target
@@ -31,8 +59,20 @@ jobs:
           fi
 
           if [ ! -f "packages/$PACKAGE/package.json" ]; then
-            echo "packages/$PACKAGE が存在しません（tag: $GITHUB_REF_NAME）" >&2
+            echo "::error::packages/$PACKAGE が存在しません（ref: $GITHUB_REF_NAME）"
             exit 1
+          fi
+
+          # タグ起動のときは、タグのバージョン部分と package.json の version の一致を見る。
+          # ずれていると、タグが指すものと実際に公開されるものが食い違う
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME##*@}"
+            VERSION="$(node -p "require('./packages/$PACKAGE/package.json').version")"
+
+            if [ "$TAG_VERSION" != "$VERSION" ]; then
+              echo "::error::タグ $GITHUB_REF_NAME と packages/$PACKAGE/package.json の version ($VERSION) が一致しません"
+              exit 1
+            fi
           fi
 
           echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
