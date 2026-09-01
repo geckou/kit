@@ -49,6 +49,8 @@ jobs:
 
       - name: Resolve target package
         id: target
+        # [[ ... =~ ... ]] は bash 固有。既定シェルが変わっても壊れないよう明示する
+        shell: bash
         env:
           INPUT_PACKAGE: ${{ github.event.inputs.package }}
         run: |
