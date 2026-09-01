@@ -43,7 +43,7 @@ jobs:
           git fetch --no-tags --quiet origin production
 
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/production; then
-            echo "::error::${GITHUB_SHA} は origin/production に含まれていません。version を上げる PR をマージしてから、production でタグを打ってください（yarn release <パッケージ>）"
+            echo "::error::${GITHUB_SHA} は origin/production に含まれていません。version を上げる PR をマージしたうえで、production でタグを打つ（yarn release <パッケージ>）か、手動実行なら Use workflow from に production を選んでください"
             exit 1
           fi
 
@@ -58,7 +58,17 @@ jobs:
             PACKAGE="${GITHUB_REF_NAME%@*}"
           fi
 
-          if [ ! -f "packages/$PACKAGE/package.json" ]; then
+          # パッケージ名はタグ名か手動実行の入力から来て、そのままパスの一部になる。
+          # 先に形式を検査して、../ によるパストラバーサルと、後続の node へ渡す
+          # 文字列への注入の余地を消す（ディレクトリ名はケバブケースに限る）
+          if ! printf '%s' "$PACKAGE" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'; then
+            echo "::error::パッケージ名の形式が不正です: $PACKAGE"
+            exit 1
+          fi
+
+          PACKAGE_JSON="$PWD/packages/$PACKAGE/package.json"
+
+          if [ ! -f "$PACKAGE_JSON" ]; then
             echo "::error::packages/$PACKAGE が存在しません（ref: $GITHUB_REF_NAME）"
             exit 1
           fi
@@ -67,7 +77,8 @@ jobs:
           # ずれていると、タグが指すものと実際に公開されるものが食い違う
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             TAG_VERSION="${GITHUB_REF_NAME##*@}"
-            VERSION="$(node -p "require('./packages/$PACKAGE/package.json').version")"
+            # パスは環境変数で渡す（node の式に文字列として展開しない）
+            VERSION="$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).version')"
 
             if [ "$TAG_VERSION" != "$VERSION" ]; then
               echo "::error::タグ $GITHUB_REF_NAME と packages/$PACKAGE/package.json の version ($VERSION) が一致しません"
