@@ -16,7 +16,9 @@ name: Publish package
 # + npm-publish Environment）を登録しておく必要がある（→ README.md）。
 #
 # npm 側の紐付けは「リポジトリ + ワークフロー」単位なので、どの ref から起動されたかは
-# 上の検査と、npm-publish Environment のタグ制限（`*@*`）で担保する。
+# 上の検査と、npm-publish Environment の「Deployment branches and tags」で担保する。
+# 許可するのはタグ `*@*`（通常のリリース）と production ブランチ（workflow_dispatch）の
+# 2 つ。タグだけにすると dispatch が弾かれる。
 on:
   push:
     tags: ['*@*']

@@ -72,7 +72,14 @@ Organization / Repository / Workflow filename は**大文字小文字まで一�
 
 npm 側の紐付けは「リポジトリ + ワークフロー」単位なので、どの ref から起動されたかまでは
 npm 側では縛れない。そこは上の `production` 包含チェックと、`npm-publish` Environment の
-「Deployment branches and tags」（タグ `*@*` に限定）で担保している。
+「Deployment branches and tags」で担保している。**許可するのは 2 つ**:
+
+| ref type | パターン | 用途 |
+| --- | --- | --- |
+| Tag | `*@*` | 通常のリリース（`yarn release`） |
+| Branch | `production` | `workflow_dispatch` での公開（初回リリース等） |
+
+**タグだけに限定すると `workflow_dispatch` が Environment 側で弾かれる。**
 
 公開されたパッケージには provenance（どのコミット・どのワークフローから公開されたかの証明）
 が付く。
