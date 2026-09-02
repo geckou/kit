@@ -49,7 +49,9 @@ done
 # そもそもこのコマンドが必要としているのは release.sh そのもの
 REPOS=()
 
-while IFS= read -r LINE; do
+# `|| [ -n "$LINE" ]` は、末尾に改行が無い最終行を取りこぼさないため
+# （read は偽を返すが値は読めている）。手で編集されても壊れないように
+while IFS= read -r LINE || [ -n "$LINE" ]; do
   [ -z "$LINE" ] && continue
   [ -f "$LINE/scripts/release.sh" ] || continue
   REPOS+=("$LINE")

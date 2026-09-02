@@ -11,7 +11,8 @@ set -u
 #   5. 未登録のパッケージ名は止める
 #   6. 複数のリポジトリに同名のパッケージがあれば止める
 #   7. 別々のリポジトリのパッケージをまとめて指定したら止める
-#   8. 消えたリポジトリの登録は無視する。worktree（.git がファイル）は無視しない
+#   8. 消えたリポジトリの登録は無視する。worktree（.git がファイル）は無視しない。
+#      末尾に改行が無い最終行も読む
 #   9. レジストリが無い / パッケージ未指定 / 不正な形式の名前は止める
 #
 # 実際のタグ打ちは行わない。release.sh は引数を書き出すだけのものに差し替える。
@@ -56,7 +57,14 @@ STUB
   done
 }
 
-WORK=$(mktemp -d)
+# 失敗して $WORK が空になると、以降の mkdir -p "$dir/..." が / 直下を触る
+WORK=$(mktemp -d) || exit 1
+
+if [ -z "$WORK" ] || [ ! -d "$WORK" ]; then
+  echo "作業ディレクトリを作れませんでした。" >&2
+  exit 1
+fi
+
 trap 'rm -rf "$WORK"' EXIT
 
 export GECKOU_RELEASE_REGISTRY="$WORK/config/release-repos"
@@ -177,6 +185,22 @@ if [ -f "$WORK/worktree-style/args.txt" ]; then
 else
   fail "worktree（.git がファイル）でも解決できる" "$output"
 fi
+
+# 手で編集されたレジストリは最終行に改行が無いことがある。
+# while read はそのとき偽を返すので、素朴に書くとその行を取りこぼす
+printf '%s' "$WORK/kit" > "$GECKOU_RELEASE_REGISTRY"
+rm -f "$WORK/kit/args.txt"
+
+output=$(cd / && "$COMMAND" billing 2>&1)
+
+if [ -f "$WORK/kit/args.txt" ]; then
+  pass "末尾に改行が無い最終行も読む"
+else
+  fail "末尾に改行が無い最終行も読む" "$output"
+fi
+
+# 後続のテストのためにレジストリを戻す
+printf '%s\n%s\n%s\n' "$WORK/starter" "$WORK/kit" "$WORK/ui" > "$GECKOU_RELEASE_REGISTRY"
 
 echo "9. レジストリが無い / パッケージ未指定"
 
