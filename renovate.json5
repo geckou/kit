@@ -1,0 +1,14 @@
+// 依存更新（Renovate）の設定。
+//
+// ルール本体はテンプレート側のプリセット（geckou/project-starter の renovate/*.json）にあり、
+// ここは参照だけを持つ。ルールを直すときはプリセットを1コミット直せば、
+// このリポジトリにも派生プロジェクトにも即時に届く（コピーではなく参照）。
+//
+// 前提: Renovate の GitHub App がこのリポジトリにインストールされていること。
+// プリセット側（geckou/project-starter）は public なので追加のアクセス設定は要らない。
+//
+// mobile プリセット（Expo 系を触らせない設定）は、このリポジトリに Expo が無いので extends しない。
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['github>geckou/project-starter//renovate/default'],
+}
