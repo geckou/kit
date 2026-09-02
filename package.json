@@ -17,6 +17,7 @@
   },
   "scripts": {
     "build": "yarn workspaces run build",
+    "check:optional-peer-types": "bash scripts/check-optional-peer-types.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "yarn workspaces run lint",

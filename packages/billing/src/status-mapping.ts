@@ -1,5 +1,3 @@
-import type Stripe from 'stripe'
-
 import type { SubscriptionStatus } from './types.js'
 
 /**
@@ -7,10 +5,13 @@ import type { SubscriptionStatus } from './types.js'
  * null を返した場合は権利状態を変えない（ログのみ）。
  *
  * Stripe の綴りは 'canceled'（l が1つ）である点に注意。
+ *
+ * 引数を string にしているのは、stripe が任意の peerDependency のため。
+ * Stripe.Subscription.Status を使うと dist の .d.ts に stripe からの import が残り、
+ * RevenueCat だけを使う（stripe 未インストールの）派生で型解決できなくなる。
+ * 未知の値は default で失効扱いになるので、挙動は変わらない
  */
-export function mapStripeStatus(
-  status: Stripe.Subscription.Status
-): SubscriptionStatus | null {
+export function mapStripeStatus(status: string): SubscriptionStatus | null {
   switch (status) {
     case 'active':
     case 'trialing':
@@ -37,8 +38,7 @@ export function mapStripeStatus(
     case 'paused':
       return 'expired'
 
-    // Stripe.Subscription.Status は将来値のための OtherString を含むため
-    // 網羅できない。未知のステータスは失効扱いにする
+    // Stripe のステータスは将来増えうるため網羅できない。未知の値は失効扱いにする
     // （誤って権利を与えるより、与えないほうが被害が小さい）
     default:
       console.warn(`Unknown Stripe subscription status: ${status}`)
