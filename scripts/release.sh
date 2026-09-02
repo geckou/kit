@@ -2,7 +2,7 @@
 # パッケージを npm へ公開する。タグ（<ディレクトリ名>@<バージョン>）を打つだけで、
 # 公開そのものは .github/workflows/publish.yml が行う。
 #
-#   yarn release <パッケージのディレクトリ名>...
+#   yarn release <パッケージのディレクトリ名>... [--force]
 #   yarn release core react vue        # 複数まとめて打てる
 #
 # **バージョンを上げるのはこのスクリプトではない。** production への直接 push は
@@ -20,12 +20,30 @@
 # ことがある。
 set -euo pipefail
 
-if [ "$#" -eq 0 ]; then
-  echo "パッケージを指定してください: yarn release <パッケージのディレクトリ名>..." >&2
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# packages/<名前> と git 操作はリポジトリ直下を前提にしている。
+# どこから実行されても同じように動くよう、ルートへ移動する
+cd "$SCRIPT_DIR/.."
+
+PACKAGES=()
+FORCE=0
+
+for ARGUMENT in "$@"; do
+  case "$ARGUMENT" in
+    --force) FORCE=1 ;;
+    -*)
+      echo "不明なオプションです: $ARGUMENT" >&2
+      exit 1
+      ;;
+    *) PACKAGES+=("$ARGUMENT") ;;
+  esac
+done
+
+if [ "${#PACKAGES[@]}" -eq 0 ]; then
+  echo "パッケージを指定してください: yarn release <パッケージのディレクトリ名>... [--force]" >&2
   exit 1
 fi
-
-PACKAGES=("$@")
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "コミットされていない変更があります。先にコミットしてください。" >&2
@@ -101,6 +119,20 @@ for PACKAGE in "${PACKAGES[@]}"; do
   fi
 
   TAGS+=("$TAG")
+done
+
+# 公開済みの型定義と比べて、破壊的変更が patch に載っていないかを見る
+# （geckou/project-starter#155。判定できない場合は素通しする安全網）
+for PACKAGE in "${PACKAGES[@]}"; do
+  if ! node "$SCRIPT_DIR/check-api-diff.mjs" "$PACKAGE"; then
+    if [ "$FORCE" -ne 1 ]; then
+      echo "" >&2
+      echo "タグは打っていません。version を上げ直すか、--force を付けて実行してください。" >&2
+      exit 1
+    fi
+
+    echo "[force] API の差分を無視して続行します"
+  fi
 done
 
 for TAG in "${TAGS[@]}"; do

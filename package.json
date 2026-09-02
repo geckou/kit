@@ -19,7 +19,8 @@
     "build": "yarn workspaces run build",
     "test": "yarn workspaces run test",
     "type-check": "yarn workspaces run type-check",
-    "release": "bash scripts/release.sh"
+    "release": "bash scripts/release.sh",
+    "test:api-diff": "bash scripts/test-api-diff.sh"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
