@@ -28,6 +28,12 @@ jobs:
 
       - run: yarn install --frozen-lockfile
 
+      - name: Lint
+        run: yarn lint
+
+      - name: Format Check
+        run: yarn format:check
+
       - name: Type Check
         run: yarn type-check
 

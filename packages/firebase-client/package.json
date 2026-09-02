@@ -43,12 +43,15 @@
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "peerDependencies": {
     "firebase": ">=11.0.0"
   },
   "devDependencies": {
+    "@geckou/eslint-config": "^0.1.1",
     "firebase": "^11.0.0"
   },
   "typesVersions": {

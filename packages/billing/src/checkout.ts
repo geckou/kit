@@ -111,7 +111,10 @@ export async function createPortalSession(
 
     // 一度も Stripe で購入していないユーザーにはポータルが存在しない
     if (!customerId) {
-      return { status: 404, body: { error: 'No Stripe customer for this user' } }
+      return {
+        status: 404,
+        body: { error: 'No Stripe customer for this user' },
+      }
     }
 
     const session = await stripe.client.billingPortal.sessions.create({

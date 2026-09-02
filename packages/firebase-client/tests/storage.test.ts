@@ -15,9 +15,8 @@ const sdk = vi.hoisted(() => ({
 
 vi.mock('firebase/storage', () => sdk)
 
-const { deleteFile, getFileUrl, getFirebaseStorage, uploadFile } = await import(
-  '../src/storage'
-)
+const { deleteFile, getFileUrl, getFirebaseStorage, uploadFile } =
+  await import('../src/storage')
 
 const app = {} as never
 

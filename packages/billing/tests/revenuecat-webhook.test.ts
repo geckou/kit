@@ -294,7 +294,10 @@ describe('RevenueCat Webhook', () => {
   it('文字列 body も正しく処理する', async () => {
     const result = await handleRevenueCatWebhook(
       createConfig(),
-      createRequest(JSON.stringify(createEventBody('RENEWAL', 'user-1')), authed)
+      createRequest(
+        JSON.stringify(createEventBody('RENEWAL', 'user-1')),
+        authed
+      )
     )
 
     expect(result.status).toBe(200)
