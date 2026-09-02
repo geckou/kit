@@ -100,11 +100,15 @@ function isPatchOnly(published, next) {
   return publishedMajor === nextMajor && publishedMinor === nextMinor
 }
 
+// 展開できないときは null を返す（壊れたダウンロード等で誤ってブロックしないため）
 function extractTarball(tarball, destination) {
   fs.mkdirSync(destination, { recursive: true })
-  run('tar', ['xzf', tarball, '-C', destination])
 
-  return path.join(destination, 'package')
+  if (tryRun('tar', ['xzf', tarball, '-C', destination]) === null) return null
+
+  const root = path.join(destination, 'package')
+
+  return fs.existsSync(root) ? root : null
 }
 
 // package.json は version が必ず変わるので比べない
@@ -272,6 +276,13 @@ function main() {
 
     const before = extractTarball(publishedTarball, path.join(work, 'before'))
     const after = extractTarball(nextTarball, path.join(work, 'after'))
+
+    if (before === null || after === null) {
+      console.log(
+        `[skip] ${name} の tarball を展開できなかったため検査しません`
+      )
+      return
+    }
 
     const types = diffTrees(before, after, '.d.ts')
 

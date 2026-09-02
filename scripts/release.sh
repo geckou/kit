@@ -22,6 +22,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# packages/<名前> と git 操作はリポジトリ直下を前提にしている。
+# どこから実行されても同じように動くよう、ルートへ移動する
+cd "$SCRIPT_DIR/.."
+
 PACKAGES=()
 FORCE=0
 

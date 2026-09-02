@@ -9,7 +9,8 @@ set -u
 #   3. エクスポートの追加も差分として検出する（互換の追加かは人が判断する）
 #   4. 型定義を持たないパッケージは止めず、内容が変わっていることを警告する
 #   5. ビルドできない環境では止めない（検査できないだけ）
-#   6. 存在しないパッケージ・引数なしはエラーになる
+#   6. tarball を展開できないときは止めない
+#   7. 存在しないパッケージ・引数なしはエラーになる
 #
 # 公開物の取得は --published-tarball で差し替える（ネットワークに依存させないため）。
 # npm view / curl 経由の経路は、その性質上ここでは検証できない。
@@ -60,10 +61,23 @@ JSON
 # 公開済みの tarball を作る
 pack_published() {
   local dir=$1
+  local output
   local packed
 
-  # ファイル名は npm の命名に任せる（version を変えても壊れないように）
-  packed=$(cd "$dir/packages/demo" && npm pack --silent --pack-destination "$dir" 2>/dev/null | tail -1)
+  # ファイル名は npm の命名に任せる（version を変えても壊れないように）。
+  # pack に失敗したまま進むと、後続の検証が意味を失うのでテストごと落とす
+  if ! output=$(cd "$dir/packages/demo" && npm pack --silent --pack-destination "$dir" 2>&1); then
+    echo "  [NG] npm pack に失敗しました" >&2
+    echo "$output" | sed 's/^/       /' >&2
+    exit 1
+  fi
+
+  packed=$(printf '%s' "$output" | tail -1)
+
+  if [ -z "$packed" ] || [ ! -f "$dir/$packed" ]; then
+    echo "  [NG] npm pack の出力からファイルを特定できませんでした: '$packed'" >&2
+    exit 1
+  fi
 
   echo "$dir/$packed"
 }
@@ -200,7 +214,29 @@ fi
 rm -rf "$work"
 echo ""
 
-echo "[6] 引数の検査"
+echo "[6] tarball が壊れているとき"
+work=$(mktemp -d)
+make_package "$work" 'export declare const demo: number'
+printf 'これは tarball ではない\n' > "$work/broken.tgz"
+output=$(check "$work" "$work/broken.tgz")
+status=$?
+
+if [ "$status" -eq 0 ]; then
+  pass "展開できなければ止めない（検査できないだけ）"
+else
+  fail "壊れた tarball で止めた" "$output"
+fi
+
+if printf '%s' "$output" | grep -q 'skip'; then
+  pass "展開できなかったことを出す"
+else
+  fail "skip の理由が出ない" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[7] 引数の検査"
 work=$(mktemp -d)
 make_package "$work" 'export declare const demo: number'
 published=$(pack_published "$work")
