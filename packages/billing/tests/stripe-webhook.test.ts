@@ -110,6 +110,29 @@ describe('Stripe Webhook', () => {
     expect(mockConstructEvent).not.toHaveBeenCalled()
   })
 
+  // 署名検証には「パース前の生ボディ」が要る。パース済みの body を渡す退行を止める
+  it('constructEvent に rawBody・署名・シークレットをそのまま渡す', async () => {
+    mockConstructEvent.mockReturnValue(
+      createSubscriptionEvent('customer.subscription.updated')
+    )
+
+    const rawBody = Buffer.from('{"id":"evt_test"}')
+
+    await handleStripeWebhook(
+      createConfig(),
+      createRequest({
+        rawBody,
+        headers: { 'stripe-signature': 'sig_test' },
+      })
+    )
+
+    expect(mockConstructEvent).toHaveBeenCalledWith(
+      rawBody,
+      'sig_test',
+      'whsec_test'
+    )
+  })
+
   it('署名検証に失敗すると 400 を返す', async () => {
     mockConstructEvent.mockImplementation(() => {
       throw new Error('Invalid signature')

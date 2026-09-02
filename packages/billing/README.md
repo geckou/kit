@@ -69,6 +69,14 @@ TestFlight や開発ビルドが本番の Webhook URL を叩いたときに、�
 import { isSubscriptionActive, hasPlan } from '@geckou/billing'
 ```
 
+**ブラウザ（クライアントコンポーネント）からはサブパスを使う。**
+ルートは Webhook の署名検証で Node の `crypto` を読むため、バンドルに入ってしまう。
+
+```ts
+import { isSubscriptionActive } from '@geckou/billing/entitlement'
+import type { Subscription } from '@geckou/billing/entitlement'
+```
+
 ## 設計方針
 
 - `process.env` を読まない（設定は全て `createBilling` の config で注入）

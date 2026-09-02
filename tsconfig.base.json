@@ -6,6 +6,9 @@
     "strict": true,
     "declaration": true,
     "sourceMap": true,
+    // 公開物には src を含めないため、参照ではなく中身を埋める
+    // （入れないと .js.map が存在しない ../src/*.ts を指す）
+    "inlineSources": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true

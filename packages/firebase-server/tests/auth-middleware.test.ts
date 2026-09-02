@@ -80,7 +80,7 @@ describe('createRequireAuth', () => {
 
     await requireAuth(req, res, next)
 
-    expect(verifyIdToken).toHaveBeenCalledWith('valid-token')
+    expect(verifyIdToken).toHaveBeenCalledWith('valid-token', false)
     expect((req as RequestLike & { uid: string }).uid).toBe('user-1')
     expect(next).toHaveBeenCalled()
     expect(res.statusCode).toBe(0)
@@ -105,3 +105,23 @@ describe('createRequireAuth', () => {
 // tsconfig.test.json の type-check で検証される
 const _responseLikeCheck: ResponseLike = createResponse()
 void _responseLikeCheck
+
+describe('createRequireAuth の checkRevoked', () => {
+  it('checkRevoked: true なら失効チェック付きで検証する', async () => {
+    const verifyIdToken = vi.fn().mockResolvedValue({ uid: 'user-1' })
+    const requireAuth = createRequireAuth(
+      { verifyIdToken },
+      { checkRevoked: true }
+    )
+
+    const next = vi.fn()
+    await requireAuth(
+      { headers: { authorization: 'Bearer valid-token' } },
+      { status: () => ({ json: () => undefined }) },
+      next
+    )
+
+    expect(verifyIdToken).toHaveBeenCalledWith('valid-token', true)
+    expect(next).toHaveBeenCalled()
+  })
+})

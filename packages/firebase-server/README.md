@@ -26,6 +26,13 @@ import { getAuth } from 'firebase-admin/auth'
 // ゲッターで渡すと Auth の解決がリクエスト時まで遅延されるため、
 // initializeApp() より先にミドルウェアを定義しても安全
 export const requireAuth = createRequireAuth(getAuth)
+
+// 失効（revokeRefreshTokens）済みのトークンも弾きたい場合。
+// 検証のたびに Firebase Auth へ問い合わせるので、レイテンシと呼び出し回数が増える。
+// 既定（false）だと、失効させても ID トークンの有効期限（最大 1 時間）は通り続ける
+export const requireFreshAuth = createRequireAuth(getAuth, {
+  checkRevoked: true,
+})
 ```
 
 ```ts
