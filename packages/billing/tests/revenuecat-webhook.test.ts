@@ -17,9 +17,12 @@ import { createTestConfig } from './helpers.js'
 // RevenueCat Dashboard で設定する Authorization ヘッダー値
 const AUTH_HEADER = 'Bearer test-webhook-auth'
 
-function createConfig(webhookAuth: string | null = AUTH_HEADER) {
+function createConfig(
+  webhookAuth: string | null = AUTH_HEADER,
+  overrides: Record<string, unknown> = {}
+) {
   return createTestConfig(
-    webhookAuth === null ? {} : { revenuecat: { webhookAuth } }
+    webhookAuth === null ? {} : { revenuecat: { webhookAuth, ...overrides } }
   )
 }
 
@@ -302,5 +305,130 @@ describe('RevenueCat Webhook', () => {
 
     expect(result.status).toBe(200)
     expect(mockApplySubscriptionEvent).toHaveBeenCalled()
+  })
+
+  // 回帰: environment を見ておらず、TestFlight / 開発ビルドの購入で
+  // 本番の権利が付いていた
+  describe('SANDBOX イベント', () => {
+    it('既定では適用しない（200 は返す）', async () => {
+      const result = await handleRevenueCatWebhook(
+        createConfig(),
+        createRequest(
+          createEventBody('INITIAL_PURCHASE', 'user-1', {
+            environment: 'SANDBOX',
+          }),
+          authed
+        )
+      )
+
+      expect(result.status).toBe(200)
+      expect(mockApplySubscriptionEvent).not.toHaveBeenCalled()
+    })
+
+    it('allowSandbox: true なら適用する', async () => {
+      const result = await handleRevenueCatWebhook(
+        createConfig(AUTH_HEADER, { allowSandbox: true }),
+        createRequest(
+          createEventBody('INITIAL_PURCHASE', 'user-1', {
+            environment: 'SANDBOX',
+          }),
+          authed
+        )
+      )
+
+      expect(result.status).toBe(200)
+      expect(mockApplySubscriptionEvent).toHaveBeenCalled()
+    })
+
+    it('PRODUCTION は既定でも適用する', async () => {
+      await handleRevenueCatWebhook(
+        createConfig(),
+        createRequest(
+          createEventBody('INITIAL_PURCHASE', 'user-1', {
+            environment: 'PRODUCTION',
+          }),
+          authed
+        )
+      )
+
+      expect(mockApplySubscriptionEvent).toHaveBeenCalled()
+    })
+  })
+
+  // 回帰: BILLING_ISSUE の expiration_at_ms は元の期間終了（ほぼ今）を指すため、
+  // in_grace_period になった直後に利用不可になっていた
+  it('BILLING_ISSUE は猶予期間の終了を currentPeriodEnd に使う', async () => {
+    const graceEnd = 1_756_000_000_000
+
+    await handleRevenueCatWebhook(
+      createConfig(),
+      createRequest(
+        createEventBody('BILLING_ISSUE', 'user-1', {
+          expiration_at_ms: 1_754_000_000_000,
+          grace_period_expiration_at_ms: graceEnd,
+        }),
+        authed
+      )
+    )
+
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        subscription: expect.objectContaining({
+          status: 'in_grace_period',
+          currentPeriodEnd: new Date(graceEnd),
+        }),
+      })
+    )
+  })
+
+  it('猶予期間の終了が無ければ expiration_at_ms を使う', async () => {
+    const expiration = 1_754_000_000_000
+
+    await handleRevenueCatWebhook(
+      createConfig(),
+      createRequest(
+        createEventBody('BILLING_ISSUE', 'user-1', {
+          expiration_at_ms: expiration,
+        }),
+        authed
+      )
+    )
+
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        subscription: expect.objectContaining({
+          currentPeriodEnd: new Date(expiration),
+        }),
+      })
+    )
+  })
+
+  // 回帰: TRANSFER を無視しており、元ユーザーの active が残っていた
+  it('TRANSFER は移動元の uid を expired にする', async () => {
+    const result = await handleRevenueCatWebhook(
+      createConfig(),
+      createRequest(
+        createEventBody('TRANSFER', 'user-new', {
+          transferred_from: ['user-old-1', 'user-old-2'],
+          transferred_to: ['user-new'],
+        }),
+        authed
+      )
+    )
+
+    expect(result.status).toBe(200)
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledTimes(2)
+
+    for (const uid of ['user-old-1', 'user-old-2']) {
+      expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          uid,
+          subscription: expect.objectContaining({ status: 'expired' }),
+        })
+      )
+    }
   })
 })

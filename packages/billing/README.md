@@ -20,7 +20,11 @@ const billing = createBilling({
     cancelUrl: process.env.STRIPE_CANCEL_URL,
     portalReturnUrl: process.env.STRIPE_PORTAL_RETURN_URL,
   },
-  revenuecat: { webhookAuth: process.env.REVENUECAT_WEBHOOK_AUTH! },
+  revenuecat: {
+    webhookAuth: process.env.REVENUECAT_WEBHOOK_AUTH!,
+    // develop 環境の Functions でのみ true にする（既定 false）
+    allowSandbox: process.env.REVENUECAT_ALLOW_SANDBOX === 'true',
+  },
   syncClaims: process.env.SYNC_SUBSCRIPTION_CLAIMS === 'true',
   onSubscriptionDowngraded: async (uid) => {
     // 無料プランの制限にデータを収める後始末をここに書く
@@ -42,6 +46,15 @@ export async function POST(req: Request) {
   return Response.json(result.body, { status: result.status })
 }
 ```
+
+### RevenueCat の環境
+
+Webhook の `environment` が `SANDBOX` のイベントは、既定では**適用せず 200 を返す**。
+TestFlight や開発ビルドが本番の Webhook URL を叩いたときに、サンドボックス購入で
+本番の権利が付くのを防ぐため。開発環境の Functions では `allowSandbox: true` にする。
+
+`TRANSFER`（権利が別の `app_user_id` へ移った）は、`transferred_from` の各ユーザーを
+`expired` にする。移った先は後続の購入・更新イベントで `active` になる。
 
 ### Checkout とプラン変更
 
