@@ -17,12 +17,24 @@
   },
   "scripts": {
     "build": "yarn workspaces run build",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "yarn workspaces run lint",
+    "lint:fix": "yarn workspaces run lint:fix",
+    "prepare": "husky",
+    "release": "bash scripts/release.sh",
     "test": "yarn workspaces run test",
-    "type-check": "yarn workspaces run type-check",
-    "release": "bash scripts/release.sh"
+    "type-check": "yarn workspaces run type-check"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21",
+    "@geckou/commitlint-config": "^0.1.1",
+    "@geckou/eslint-config": "^0.1.1",
+    "@geckou/prettier-config": "^0.1.1",
     "@types/node": "^22.20.1",
+    "eslint": "^9",
+    "husky": "^9",
+    "prettier": "^3",
     "typescript": "^5.9.2",
     "vitest": "^4.1.11"
   }
