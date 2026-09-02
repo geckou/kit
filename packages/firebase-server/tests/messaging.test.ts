@@ -68,13 +68,67 @@ describe('sendPushNotificationBatch', () => {
       notification: { title: 'タイトル', body: '本文' },
       data: { screen: 'home' },
     })
-    expect(result).toEqual({ successCount: 2, failureCount: 1 })
+    expect(result).toEqual({
+      successCount: 2,
+      failureCount: 1,
+      invalidTokens: [],
+    })
   })
 
   it('トークンが空なら送信せず 0 件を返す', async () => {
     const result = await sendPushNotificationBatch(messaging, [], payload)
 
     expect(sendEachForMulticast).not.toHaveBeenCalled()
-    expect(result).toEqual({ successCount: 0, failureCount: 0 })
+    expect(result).toEqual({
+      successCount: 0,
+      failureCount: 0,
+      invalidTokens: [],
+    })
+  })
+
+  // 回帰: 501 件以上を渡すと firebase-admin が 1 件も送らずに throw していた
+  it('500 件ずつに分割して送り、件数を合算する', async () => {
+    const tokens = Array.from({ length: 501 }, (_, i) => `token-${i}`)
+
+    sendEachForMulticast
+      .mockResolvedValueOnce({ successCount: 500, failureCount: 0 })
+      .mockResolvedValueOnce({ successCount: 1, failureCount: 0 })
+
+    const result = await sendPushNotificationBatch(messaging, tokens, payload)
+
+    expect(sendEachForMulticast).toHaveBeenCalledTimes(2)
+    expect(sendEachForMulticast.mock.calls[0][0].tokens).toHaveLength(500)
+    expect(sendEachForMulticast.mock.calls[1][0].tokens).toEqual(['token-500'])
+    expect(result).toEqual({
+      successCount: 501,
+      failureCount: 0,
+      invalidTokens: [],
+    })
+  })
+
+  // 回帰: responses を捨てていたため、恒久的に失敗するトークンを
+  // 呼び出し側が掃除できず溜まり続けていた
+  it('恒久的に失敗したトークンを invalidTokens で返す', async () => {
+    sendEachForMulticast.mockResolvedValueOnce({
+      successCount: 1,
+      failureCount: 2,
+      responses: [
+        { success: true },
+        {
+          success: false,
+          error: { code: 'messaging/registration-token-not-registered' },
+        },
+        { success: false, error: { code: 'messaging/internal-error' } },
+      ],
+    })
+
+    const result = await sendPushNotificationBatch(
+      messaging,
+      ['token-1', 'token-2', 'token-3'],
+      payload
+    )
+
+    // 一時的なエラー（internal-error）は削除対象にしない
+    expect(result.invalidTokens).toEqual(['token-2'])
   })
 })
