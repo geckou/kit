@@ -33,11 +33,14 @@ export async function applySubscriptionEvent(
     .doc(`${event.source}_${event.eventId}`)
   const userRef = db.collection(config.collectionNames.users).doc(event.uid)
 
+  const sequence = event.sequence ?? 0
+
   const next: Subscription = omitUndefined({
     ...event.subscription,
     updatedAt: new Date(),
     lastEventId: event.eventId,
     lastEventAt: event.occurredAt,
+    lastEventSequence: sequence,
   })
 
   const result = await db.runTransaction<ApplyResult>(async (transaction) => {
@@ -55,8 +58,16 @@ export async function applySubscriptionEvent(
     }
 
     const lastEventAt = toDate(current?.lastEventAt)
+    const lastSequence = current?.lastEventSequence ?? 0
+
+    // 同じ occurredAt のときは sequence で前後を決める。
+    // Stripe の event.created は秒精度で配信順も保証されないため、日時の比較だけだと
+    // 後から届いた created(incomplete) が updated(active) を上書きしてしまう
     const isStale =
-      lastEventAt !== null && lastEventAt.getTime() > event.occurredAt.getTime()
+      lastEventAt !== null &&
+      (lastEventAt.getTime() > event.occurredAt.getTime() ||
+        (lastEventAt.getTime() === event.occurredAt.getTime() &&
+          sequence < lastSequence))
 
     // stale でもイベント自体は記録して、再送のたびに読み直さないようにする
     transaction.set(eventRef, {

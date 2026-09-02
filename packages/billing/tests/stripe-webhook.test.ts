@@ -121,6 +121,39 @@ describe('Stripe Webhook', () => {
     expect(mockApplySubscriptionEvent).not.toHaveBeenCalled()
   })
 
+  // 回帰: incomplete（決済待ち）を expired にマップしており、同じ秒に届く
+  // updated(active) の後に created(incomplete) が来ると権利を失っていた
+  it('incomplete は権利状態を変えない', async () => {
+    mockConstructEvent.mockReturnValue(
+      createSubscriptionEvent('customer.subscription.created', {
+        status: 'incomplete',
+      })
+    )
+
+    const result = await handleStripeWebhook(createConfig(), createRequest())
+
+    expect(result.status).toBe(200)
+    expect(mockApplySubscriptionEvent).not.toHaveBeenCalled()
+  })
+
+  it('同じ秒のイベントを並べるための sequence を渡す', async () => {
+    for (const [type, sequence] of [
+      ['customer.subscription.created', 0],
+      ['customer.subscription.updated', 1],
+      ['customer.subscription.deleted', 2],
+    ] as const) {
+      mockApplySubscriptionEvent.mockClear()
+      mockConstructEvent.mockReturnValue(createSubscriptionEvent(type))
+
+      await handleStripeWebhook(createConfig(), createRequest())
+
+      expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ sequence })
+      )
+    }
+  })
+
   it('customer.subscription.created を active として反映する', async () => {
     mockConstructEvent.mockReturnValue(
       createSubscriptionEvent('customer.subscription.created')

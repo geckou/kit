@@ -43,6 +43,13 @@ export async function POST(req: Request) {
 }
 ```
 
+### Checkout とプラン変更
+
+`createCheckoutSession` は **新規契約のみ**を扱う。既に有効な購読を持つユーザーには
+409 を返すので、プラン変更・解約・支払い方法の更新は `createPortalSession`
+（Stripe カスタマーポータル）へ誘導する。Checkout は重複を防がないため、
+有効なまま再度作らせると同一顧客に 2 本目のサブスクリプションが作られる。
+
 権利判定だけなら factory 不要:
 
 ```ts

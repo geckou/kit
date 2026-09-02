@@ -4,12 +4,13 @@ import type { SubscriptionStatus } from './types.js'
 
 /**
  * Stripe のサブスクリプションステータスを共通の SubscriptionStatus に変換する。
+ * null を返した場合は権利状態を変えない（ログのみ）。
  *
  * Stripe の綴りは 'canceled'（l が1つ）である点に注意。
  */
 export function mapStripeStatus(
   status: Stripe.Subscription.Status
-): SubscriptionStatus {
+): SubscriptionStatus | null {
   switch (status) {
     case 'active':
     case 'trialing':
@@ -26,8 +27,12 @@ export function mapStripeStatus(
     case 'canceled':
       return 'cancelled'
 
-    // 初回決済が完了しなかった / 一時停止
+    // 決済待ち。まだ失効ではないので権利状態を変えない
+    // （Checkout 完了時は incomplete → active が同じ秒に届き、順序も保証されない）
     case 'incomplete':
+      return null
+
+    // 決済待ちのまま期限切れ / 一時停止
     case 'incomplete_expired':
     case 'paused':
       return 'expired'

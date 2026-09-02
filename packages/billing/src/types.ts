@@ -29,6 +29,8 @@ export type Subscription = {
   /** 冪等性・順序制御用（Webhook が書き込む） */
   lastEventId?: string
   lastEventAt?: Date
+  /** 同じ occurredAt のイベントを並べるための序列（→ SubscriptionEvent.sequence） */
+  lastEventSequence?: number
 }
 
 /** Webhook から渡される、経路非依存に正規化済みのイベント */
@@ -40,6 +42,14 @@ export type SubscriptionEvent = {
   uid: string
   /** プロバイダ側でイベントが発生した日時（順序制御に使う） */
   occurredAt: Date
+  /**
+   * 同じ occurredAt を持つイベントの序列。大きいほど後。
+   *
+   * Stripe の event.created は秒精度で、配信順も保証されない。Checkout 完了時の
+   * customer.subscription.created（incomplete）と .updated（active）は同じ秒に
+   * 生成されるため、日時だけでは前後を決められない。既定は 0
+   */
+  sequence?: number
   /** 反映する権利状態（updatedAt / lastEvent* は適用時に付与される） */
   subscription: Omit<Subscription, 'updatedAt' | 'lastEventId' | 'lastEventAt'>
 }

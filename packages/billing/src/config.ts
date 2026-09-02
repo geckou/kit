@@ -20,10 +20,14 @@ export type StripeClientLike = {
     ): unknown
   }
   customers: {
-    create(params: {
-      email?: string
-      metadata: Record<string, string>
-    }): Promise<{ id: string }>
+    create(
+      params: {
+        email?: string
+        metadata: Record<string, string>
+      },
+      // 二重送信で顧客が重複しないよう idempotencyKey を渡す
+      options?: { idempotencyKey?: string }
+    ): Promise<{ id: string }>
   }
   checkout: {
     sessions: {
