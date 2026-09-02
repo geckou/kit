@@ -1,5 +1,8 @@
 name: Publish package
 
+# **このファイルの正は geckou/project-starter/.github/workflows/publish.yml。**
+# 直すときはまずそちらを直してから配ること。
+#
 # geckou/ui と同じタグ駆動。<パッケージのディレクトリ名>@<バージョン>（例: billing@0.1.0）
 #
 # **公開できるのは production に入っているコミットだけ。** タグも workflow_dispatch も

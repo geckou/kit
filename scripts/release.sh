@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#
+# **このファイルの正は geckou/project-starter/scripts/release.sh。**
+# geckou/kit・geckou/ui にも同じものがあるが、直すときはまずここを直してから配ること
+# （3 リポジトリで中身が同じであることを install-release-command.sh が前提にしている）。
 # パッケージを npm へ公開する。タグ（<ディレクトリ名>@<バージョン>）を打つだけで、
 # 公開そのものは .github/workflows/publish.yml が行う。
 #
