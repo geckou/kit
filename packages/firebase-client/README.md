@@ -45,6 +45,9 @@ initFirebase(config, (app) =>
 ```
 
 すでに初期化済みのアプリがあれば再利用するので、複数回呼んでも多重初期化にならない。
+**2 回目以降は `createAuth` も呼ばれず、初期化済みの Auth が返る。**
+`getReactNativePersistence()` は呼ぶたびに別のクラスを返すため、再度 `initializeAuth` を
+呼ぶと `auth/already-initialized` で落ちる（Fast Refresh や複数モジュールからの呼び出し）。
 
 ## Firestore
 
