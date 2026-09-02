@@ -39,15 +39,21 @@ cp "$SCRIPT_DIR/geckou-release" "$BIN_DIR/geckou-release"
 chmod +x "$BIN_DIR/geckou-release"
 echo "[ok] 置いた: $BIN_DIR/geckou-release"
 
+# PATH が通っていないときに「どこからでも実行できます」と続けると、
+# 警告が読み飛ばされる。分岐して、やることが残っているならそれだけを出す
 case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
+  *":$BIN_DIR:"*)
+    echo ""
+    echo "以降はどこからでも実行できます:"
+    echo "  geckou-release <パッケージのディレクトリ名>... [--force]"
+    ;;
   *)
     echo ""
-    echo "$BIN_DIR が PATH に入っていません。シェルの設定に次を足してください:"
+    echo "あと 1 つ: $BIN_DIR が PATH に入っていません。"
+    echo "シェルの設定（~/.zshrc など）に次を足して、読み込み直してください:"
+    echo ""
     echo "  export PATH=\"$BIN_DIR:\$PATH\""
+    echo ""
+    echo "そのあと geckou-release <パッケージのディレクトリ名>... が使えます。"
     ;;
 esac
-
-echo ""
-echo "以降はどこからでも実行できます:"
-echo "  geckou-release <パッケージのディレクトリ名>... [--force]"
