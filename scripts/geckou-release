@@ -34,6 +34,15 @@ if [ "${#PACKAGES[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# パッケージ名はそのまま packages/<名前> のパスになる。release.sh と同じ検査を
+# ここでも行い、不正な値は「リポジトリが見つからない」ではなく形式の誤りとして返す
+for PACKAGE in "${PACKAGES[@]}"; do
+  if [[ ! "$PACKAGE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+    echo "パッケージ名の形式が不正です（ケバブケースのディレクトリ名のみ）: $PACKAGE" >&2
+    exit 1
+  fi
+done
+
 # 登録済みのうち、実在するものだけを見る（リポジトリを消しても壊れないように）。
 # 判定は .git ではなく release.sh の有無で行う。git worktree や submodule では
 # .git がファイルになるため、ディレクトリ判定だと実在するのに無視される。

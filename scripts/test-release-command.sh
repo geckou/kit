@@ -12,7 +12,7 @@ set -u
 #   6. 複数のリポジトリに同名のパッケージがあれば止める
 #   7. 別々のリポジトリのパッケージをまとめて指定したら止める
 #   8. 消えたリポジトリの登録は無視する。worktree（.git がファイル）は無視しない
-#   9. レジストリが無い / パッケージ未指定は止める
+#   9. レジストリが無い / パッケージ未指定 / 不正な形式の名前は止める
 #
 # 実際のタグ打ちは行わない。release.sh は引数を書き出すだけのものに差し替える。
 
@@ -197,6 +197,19 @@ if [ "$status" -ne 0 ] && echo "$output" | grep -q "パッケージを指定し�
 else
   fail "パッケージ未指定なら止まる" "$output"
 fi
+
+# パッケージ名はそのまま packages/<名前> のパスになる。release.sh と同じ検査を
+# 手前でも行う（「リポジトリが無い」ではなく形式の誤りとして返す）
+for invalid in '../../etc' 'Foo' 'a_b' ''; do
+  output=$(cd / && "$COMMAND" "$invalid" 2>&1)
+  status=$?
+
+  if [ "$status" -ne 0 ] && echo "$output" | grep -q "形式が不正\|パッケージを指定してください"; then
+    pass "不正な名前は止まる: [$invalid]"
+  else
+    fail "不正な名前は止まる: [$invalid]" "$output"
+  fi
+done
 
 echo ""
 echo "成功 $passed / 失敗 $failed"
