@@ -1,0 +1,7 @@
+# 整形だけのコミット。blame から除外する。
+#   git blame --ignore-revs-file .git-blame-ignore-revs <file>
+# GitHub は自動で参照する。ローカルでも常に効かせるなら:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: Prettier の共通設定に合わせて整形する
+2f5eaa4ab2dccb16f97b5c9f785adad40c851fd6
