@@ -121,6 +121,17 @@ for PACKAGE in "${PACKAGES[@]}"; do
   TAGS+=("$TAG")
 done
 
+# ワークスペースの参照レンジがローカルの version を満たしているか。
+# 満たしていないと、テンプレート自身は npm の旧版を使ったまま公開することになる
+# （geckou/project-starter#159）。CI でも見ているが、手元から打たれる場合の担保
+if [ -f "$SCRIPT_DIR/check-workspace-ranges.mjs" ]; then
+  if ! node "$SCRIPT_DIR/check-workspace-ranges.mjs"; then
+    echo "" >&2
+    echo "タグは打っていません。参照レンジを直す PR をマージしてから実行してください。" >&2
+    exit 1
+  fi
+fi
+
 # 公開済みの型定義と比べて、破壊的変更が patch に載っていないかを見る
 # （geckou/project-starter#155。判定できない場合は素通しする安全網）
 for PACKAGE in "${PACKAGES[@]}"; do

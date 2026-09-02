@@ -51,7 +51,7 @@
     "firebase": ">=11.0.0"
   },
   "devDependencies": {
-    "@geckou/eslint-config": "^0.1.1",
+    "@geckou/eslint-config": "^0.3.0",
     "firebase": "^11.0.0"
   },
   "typesVersions": {
