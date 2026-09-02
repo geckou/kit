@@ -21,6 +21,11 @@ jobs:
           node-version: 22
           cache: yarn
 
+      # リリース時の API 差分検査の回帰テスト。npm レジストリには接続しない
+      # （公開物は --published-tarball で差し替える）
+      - name: API Diff Guard Test
+        run: bash scripts/test-api-diff.sh
+
       - run: yarn install --frozen-lockfile
 
       - name: Lint
