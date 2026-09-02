@@ -1,6 +1,6 @@
 {
   "name": "@geckou/firebase-client",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Firebase client SDK wrappers (app init / Firestore CRUD / Storage) for web and React Native",
   "type": "commonjs",
   "main": "./dist/index.js",
