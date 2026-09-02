@@ -228,7 +228,7 @@ for invalid in '../../etc' 'Foo' 'a_b' ''; do
   output=$(cd / && "$COMMAND" "$invalid" 2>&1)
   status=$?
 
-  if [ "$status" -ne 0 ] && echo "$output" | grep -q "形式が不正\|パッケージを指定してください"; then
+  if [ "$status" -ne 0 ] && echo "$output" | grep -Eq "形式が不正|パッケージを指定してください"; then
     pass "不正な名前は止まる: [$invalid]"
   else
     fail "不正な名前は止まる: [$invalid]" "$output"
