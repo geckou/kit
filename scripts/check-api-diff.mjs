@@ -38,17 +38,29 @@ function parseArguments(argv) {
 
       const value = argv[index]
 
-      if (value === undefined || value.startsWith('-')) {
+      // 値の省略だけを弾く。`-` 始まりのファイル名は正当なので、長いオプション
+      // （--force 等）が続いた場合だけ「値が無い」と判断する
+      if (value === undefined || value.startsWith('--')) {
         throw new Error(
           '--published-tarball にはファイルのパスを指定してください'
         )
       }
 
-      if (!fs.existsSync(value)) {
+      // 絶対パスにする。`-fixture.tgz` のような名前をそのまま tar へ渡すと
+      // オプションと解釈されるため
+      const resolved = path.resolve(value)
+
+      if (!fs.existsSync(resolved)) {
         throw new Error(`--published-tarball のファイルがありません: ${value}`)
       }
 
-      options.publishedTarball = value
+      if (!fs.statSync(resolved).isFile()) {
+        throw new Error(
+          `--published-tarball にはファイルを指定してください: ${value}`
+        )
+      }
+
+      options.publishedTarball = resolved
     } else if (options.package === null) {
       options.package = argument
     } else {

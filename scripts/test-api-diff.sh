@@ -269,6 +269,25 @@ else
   fail "存在しないファイルのエラーが分かりにくい" "$output"
 fi
 
+output=$(cd "$work" && node "$SCRIPT" demo --published-tarball "$work" 2>&1)
+
+if printf '%s' "$output" | grep -q 'ファイルを指定'; then
+  pass "ディレクトリを渡したら、その旨のエラーになる"
+else
+  fail "ディレクトリのエラーが分かりにくい" "$output"
+fi
+
+# `-` 始まりのファイル名は正当。オプションと誤認しない
+cp "$published" "$work/-fixture.tgz"
+output=$(cd "$work" && node "$SCRIPT" demo --published-tarball ./-fixture.tgz 2>&1)
+status=$?
+
+if [ "$status" -eq 0 ] && printf '%s' "$output" | grep -q '差分はありません'; then
+  pass "- 始まりのファイル名も受け付ける"
+else
+  fail "- 始まりのファイル名を弾いた" "$output"
+fi
+
 rm -rf "$work"
 
 echo ""
