@@ -51,7 +51,10 @@ export type SubscriptionEvent = {
    */
   sequence?: number
   /** 反映する権利状態（updatedAt / lastEvent* は適用時に付与される） */
-  subscription: Omit<Subscription, 'updatedAt' | 'lastEventId' | 'lastEventAt'>
+  subscription: Omit<
+    Subscription,
+    'updatedAt' | 'lastEventId' | 'lastEventAt' | 'lastEventSequence'
+  >
 }
 
 export type ApplyStatus = 'applied' | 'duplicate' | 'stale'
