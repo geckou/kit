@@ -26,6 +26,11 @@ jobs:
       - name: API Diff Guard Test
         run: bash scripts/test-api-diff.sh
 
+      # どこからでも公開できるようにするコマンドの回帰テスト。
+      # 偽のリポジトリを作って動かすだけなので node も yarn も要らない
+      - name: Release Command Test
+        run: bash scripts/test-release-command.sh
+
       - run: yarn install --frozen-lockfile
 
       - name: Lint

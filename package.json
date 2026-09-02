@@ -25,6 +25,7 @@
     "release": "bash scripts/release.sh",
     "test": "yarn workspaces run test",
     "test:api-diff": "bash scripts/test-api-diff.sh",
+    "test:release-command": "bash scripts/test-release-command.sh",
     "type-check": "yarn workspaces run type-check"
   },
   "devDependencies": {

@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# どのディレクトリからでもパッケージを公開するためのコマンド。
+#
+#   geckou-release eslint-config
+#   geckou-release core react vue --force
+#
+# パッケージ名からリポジトリを引いて、そのリポジトリの scripts/release.sh に渡す。
+# 検査もタグ打ちも release.sh 側が行う（このスクリプトは行き先を決めるだけ）。
+#
+# リポジトリの場所は、各リポジトリで scripts/install-release-command.sh を
+# 一度実行したときに登録される。追加・移動したらもう一度実行する。
+set -euo pipefail
+
+REGISTRY="${GECKOU_RELEASE_REGISTRY:-${XDG_CONFIG_HOME:-$HOME/.config}/geckou/release-repos}"
+
+if [ ! -f "$REGISTRY" ]; then
+  echo "リポジトリが 1 つも登録されていません。" >&2
+  echo "各リポジトリで一度 bash scripts/install-release-command.sh を実行してください。" >&2
+  exit 1
+fi
+
+# 引数からパッケージ名だけを取り出す（オプションは release.sh がそのまま解釈する）
+PACKAGES=()
+
+for ARGUMENT in "$@"; do
+  case "$ARGUMENT" in
+    -*) ;;
+    *) PACKAGES+=("$ARGUMENT") ;;
+  esac
+done
+
+if [ "${#PACKAGES[@]}" -eq 0 ]; then
+  echo "パッケージを指定してください: geckou-release <パッケージのディレクトリ名>... [--force]" >&2
+  exit 1
+fi
+
+# 登録済みのうち、実在するものだけを見る（リポジトリを消しても壊れないように）。
+# 判定は .git ではなく release.sh の有無で行う。git worktree や submodule では
+# .git がファイルになるため、ディレクトリ判定だと実在するのに無視される。
+# そもそもこのコマンドが必要としているのは release.sh そのもの
+REPOS=()
+
+while IFS= read -r LINE; do
+  [ -z "$LINE" ] && continue
+  [ -f "$LINE/scripts/release.sh" ] || continue
+  REPOS+=("$LINE")
+done < "$REGISTRY"
+
+if [ "${#REPOS[@]}" -eq 0 ]; then
+  echo "登録されたリポジトリが見つかりません（移動または削除されています）: $REGISTRY" >&2
+  echo "各リポジトリで bash scripts/install-release-command.sh を実行し直してください。" >&2
+  exit 1
+fi
+
+# パッケージ名からリポジトリを引く。1 つに定まらなければ、何もせずに止める
+find_repo() {
+  local package=$1
+  local found=()
+
+  for repo in "${REPOS[@]}"; do
+    if [ -f "$repo/packages/$package/package.json" ]; then
+      found+=("$repo")
+    fi
+  done
+
+  if [ "${#found[@]}" -eq 0 ]; then
+    echo "packages/$package を持つリポジトリが登録されていません。" >&2
+    echo "登録済み:" >&2
+    printf '  %s\n' "${REPOS[@]}" >&2
+    return 1
+  fi
+
+  if [ "${#found[@]}" -gt 1 ]; then
+    echo "packages/$package が複数のリポジトリにあります。リポジトリ側で実行してください。" >&2
+    printf '  %s\n' "${found[@]}" >&2
+    return 1
+  fi
+
+  printf '%s' "${found[0]}"
+}
+
+TARGET=$(find_repo "${PACKAGES[0]}")
+
+# 複数指定は release.sh がまとめてタグを打つため、同じリポジトリのものに限る
+for PACKAGE in "${PACKAGES[@]:1}"; do
+  OTHER=$(find_repo "$PACKAGE")
+
+  if [ "$OTHER" != "$TARGET" ]; then
+    echo "指定されたパッケージが別のリポジトリにまたがっています。分けて実行してください。" >&2
+    echo "  ${PACKAGES[0]}: $TARGET" >&2
+    echo "  $PACKAGE: $OTHER" >&2
+    exit 1
+  fi
+done
+
+echo "[repo] $TARGET"
+
+exec bash "$TARGET/scripts/release.sh" "$@"
