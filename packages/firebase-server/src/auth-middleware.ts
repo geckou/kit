@@ -8,7 +8,18 @@
  */
 
 export type TokenVerifierLike = {
-  verifyIdToken(token: string): Promise<{ uid: string }>
+  verifyIdToken(token: string, checkRevoked?: boolean): Promise<{ uid: string }>
+}
+
+export type RequireAuthOptions = {
+  /**
+   * 失効（revokeRefreshTokens）済みのトークンを弾くか。既定 false。
+   *
+   * true にすると検証のたびに Firebase Auth へ問い合わせるので、
+   * レイテンシと呼び出し回数が増える。false のままだと、失効させても
+   * ID トークンの有効期限（最大 1 時間）は通り続ける
+   */
+  checkRevoked?: boolean
 }
 
 export type RequestLike = {
@@ -30,9 +41,11 @@ export type NextLike = () => void
  * ように渡すと解決をリクエスト時まで遅延できる
  */
 export function createRequireAuth(
-  auth: TokenVerifierLike | (() => TokenVerifierLike)
+  auth: TokenVerifierLike | (() => TokenVerifierLike),
+  options: RequireAuthOptions = {}
 ) {
   const resolveAuth = typeof auth === 'function' ? auth : () => auth
+  const checkRevoked = options.checkRevoked ?? false
 
   return async function requireAuth(
     req: RequestLike,
@@ -47,7 +60,7 @@ export function createRequireAuth(
     }
 
     try {
-      const decoded = await resolveAuth().verifyIdToken(token)
+      const decoded = await resolveAuth().verifyIdToken(token, checkRevoked)
       ;(req as RequestLike & { uid: string }).uid = decoded.uid
       next()
     } catch {

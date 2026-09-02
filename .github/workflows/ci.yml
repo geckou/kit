@@ -47,3 +47,7 @@ jobs:
 
       - name: Build
         run: yarn build
+
+      # 任意 peer（stripe）の型が公開する .d.ts に漏れていないか
+      - name: Check optional peer types
+        run: yarn check:optional-peer-types

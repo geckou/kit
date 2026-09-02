@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from './config.js'
+import { isSubscriptionActive } from './entitlement.js'
 import { getStripeCustomerId, saveStripeCustomerId } from './subscription.js'
-import type { HttpResult } from './types.js'
+import type { HttpResult, Subscription } from './types.js'
 
 /**
  * uid に対応する Stripe 顧客を取得する。無ければ作成して保存する。
@@ -24,13 +25,29 @@ async function findOrCreateCustomer(
     email = undefined
   }
 
-  const customer = await stripe.client.customers.create({
-    email,
-    metadata: { uid },
-  })
+  // 二重送信（ダブルクリック・複数タブ）で顧客が 2 つ作られると、保存した ID と
+  // 実際に決済された顧客が食い違い、ポータルから解約できなくなる。
+  // 同じキーなら Stripe が同じ顧客を返す
+  const customer = await stripe.client.customers.create(
+    { email, metadata: { uid } },
+    { idempotencyKey: `customer_${uid}` }
+  )
   await saveStripeCustomerId(config, uid, customer.id)
 
   return customer.id
+}
+
+/** users/{uid}.subscription を読む（未作成のユーザーは undefined） */
+async function getSubscription(
+  config: ResolvedConfig,
+  uid: string
+): Promise<Subscription | undefined> {
+  const snapshot = await config.firestore
+    .collection(config.collectionNames.users)
+    .doc(uid)
+    .get()
+
+  return snapshot.get('subscription') as Subscription | undefined
 }
 
 /**
@@ -63,6 +80,19 @@ export async function createCheckoutSession(
   }
 
   try {
+    // 有効な購読があるまま再度作らせると、同一顧客に 2 本目のサブスクリプションが
+    // 作られる（Checkout は重複を防がない）。users/{uid}.subscription は 1 つしか
+    // 持てないため、片方が解約されるともう片方は課金だけ残る。
+    // プラン変更はカスタマーポータルへ誘導する
+    const current = await getSubscription(config, input.uid)
+
+    if (isSubscriptionActive(current)) {
+      return {
+        status: 409,
+        body: { error: 'Subscription already active' },
+      }
+    }
+
     const customerId = await findOrCreateCustomer(config, input.uid)
     const session = await stripe.client.checkout.sessions.create({
       mode: 'subscription',

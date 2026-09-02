@@ -91,8 +91,8 @@ export async function queryDocuments<T>(
     }
 
     if (options.sort) {
-      for (const s of options.sort) {
-        constraints.push(orderBy(s.field, s.direction || 'asc'))
+      for (const sort of options.sort) {
+        constraints.push(orderBy(sort.field, sort.direction || 'asc'))
       }
     }
 
@@ -104,10 +104,12 @@ export async function queryDocuments<T>(
       constraints.push(limit(options.pageSize))
     }
 
-    const q = query(collection(db, collectionName), ...constraints)
-    const snapshot = await getDocs(q)
+    const builtQuery = query(collection(db, collectionName), ...constraints)
+    const snapshot = await getDocs(builtQuery)
 
-    const items = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as T)
+    const items = snapshot.docs.map(
+      (doc) => ({ ...doc.data(), id: doc.id }) as T
+    )
 
     const lastDoc =
       snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null
@@ -223,8 +225,8 @@ export function subscribeCollection<T>(
   }
 
   if (options.sort) {
-    for (const s of options.sort) {
-      constraints.push(orderBy(s.field, s.direction || 'asc'))
+    for (const sort of options.sort) {
+      constraints.push(orderBy(sort.field, sort.direction || 'asc'))
     }
   }
 
@@ -232,12 +234,14 @@ export function subscribeCollection<T>(
     constraints.push(limit(options.pageSize))
   }
 
-  const q = query(collection(db, collectionName), ...constraints)
+  const builtQuery = query(collection(db, collectionName), ...constraints)
 
   return onSnapshot(
-    q,
+    builtQuery,
     (snapshot: QuerySnapshot) => {
-      const items = snapshot.docs.map((d) => ({ ...d.data(), id: d.id }) as T)
+      const items = snapshot.docs.map(
+        (doc) => ({ ...doc.data(), id: doc.id }) as T
+      )
       onData(items)
     },
     (error) => {

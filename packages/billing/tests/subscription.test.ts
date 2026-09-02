@@ -348,4 +348,86 @@ describe('権利変化の副作用', () => {
 
     expect(result.status).toBe('applied')
   })
+
+  // 回帰: Stripe の event.created は秒精度で配信順も保証されない。
+  // Checkout 完了時の created(incomplete) と updated(active) は同じ秒に生成され、
+  // 日時の比較だけだと後から届いた created が active を上書きしていた
+  describe('同じ occurredAt のイベント', () => {
+    const sameSecond = new Date('2026-08-01T00:00:00Z')
+
+    it('後から届いた created は sequence が小さいので stale になる', async () => {
+      await applySubscriptionEvent(
+        config,
+        createEvent({
+          eventId: 'evt_updated',
+          occurredAt: sameSecond,
+          sequence: 1,
+          subscription: { status: 'active', source: 'stripe' },
+        })
+      )
+
+      const result = await applySubscriptionEvent(
+        config,
+        createEvent({
+          eventId: 'evt_created',
+          occurredAt: sameSecond,
+          sequence: 0,
+          subscription: { status: 'expired', source: 'stripe' },
+        })
+      )
+
+      expect(result.status).toBe('stale')
+      expect(readSubscription('user-1').status).toBe('active')
+    })
+
+    it('created → updated の順なら両方適用される', async () => {
+      await applySubscriptionEvent(
+        config,
+        createEvent({
+          eventId: 'evt_created',
+          occurredAt: sameSecond,
+          sequence: 0,
+          subscription: { status: 'expired', source: 'stripe' },
+        })
+      )
+
+      const result = await applySubscriptionEvent(
+        config,
+        createEvent({
+          eventId: 'evt_updated',
+          occurredAt: sameSecond,
+          sequence: 1,
+          subscription: { status: 'active', source: 'stripe' },
+        })
+      )
+
+      expect(result.status).toBe('applied')
+      expect(readSubscription('user-1').status).toBe('active')
+    })
+
+    it('sequence が同じなら後から来たものを適用する', async () => {
+      await applySubscriptionEvent(
+        config,
+        createEvent({
+          eventId: 'evt_a',
+          occurredAt: sameSecond,
+          sequence: 1,
+          subscription: { status: 'active', source: 'stripe' },
+        })
+      )
+
+      const result = await applySubscriptionEvent(
+        config,
+        createEvent({
+          eventId: 'evt_b',
+          occurredAt: sameSecond,
+          sequence: 1,
+          subscription: { status: 'cancelled', source: 'stripe' },
+        })
+      )
+
+      expect(result.status).toBe('applied')
+      expect(readSubscription('user-1').status).toBe('cancelled')
+    })
+  })
 })

@@ -21,11 +21,23 @@ export function initFirebase(
   },
   createAuth?: (app: FirebaseApp) => Auth
 ) {
-  const app = getApps().length === 0 ? initializeApp(config) : getApps()[0]
+  const existingApp = getApps()[0]
+  const app = existingApp ?? initializeApp(config)
+
+  // 2 回目以降は createAuth を呼ばない。
+  // React Native の getReactNativePersistence() は呼ぶたびに別のクラスを返すため、
+  // 初期化済みの app に対して initializeAuth を再度呼ぶと
+  // auth/already-initialized で throw する（Fast Refresh や複数モジュールからの呼び出し）。
+  // initializeAuth 済みの app に対する getAuth は、そのインスタンスを返す
+  const auth = existingApp
+    ? getAuth(app)
+    : createAuth
+      ? createAuth(app)
+      : getAuth(app)
 
   return {
     app,
-    auth: createAuth ? createAuth(app) : getAuth(app),
+    auth,
     db: getFirestore(app),
   }
 }

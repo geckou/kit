@@ -20,10 +20,14 @@ export type StripeClientLike = {
     ): unknown
   }
   customers: {
-    create(params: {
-      email?: string
-      metadata: Record<string, string>
-    }): Promise<{ id: string }>
+    create(
+      params: {
+        email?: string
+        metadata: Record<string, string>
+      },
+      // 二重送信で顧客が重複しないよう idempotencyKey を渡す
+      options?: { idempotencyKey?: string }
+    ): Promise<{ id: string }>
   }
   checkout: {
     sessions: {
@@ -100,6 +104,13 @@ export type BillingConfig = {
   revenuecat?: {
     /** Dashboard > Integrations > Webhooks で設定した Authorization ヘッダー値 */
     webhookAuth: string
+    /**
+     * SANDBOX 環境のイベントを適用するか（既定 false）。
+     *
+     * TestFlight や開発ビルドが本番の Webhook URL を叩くと、サンドボックス購入で
+     * 本番の権利が付いてしまう。develop 環境の Functions でのみ true にする
+     */
+    allowSandbox?: boolean
   }
 
   /**

@@ -20,7 +20,11 @@ const billing = createBilling({
     cancelUrl: process.env.STRIPE_CANCEL_URL,
     portalReturnUrl: process.env.STRIPE_PORTAL_RETURN_URL,
   },
-  revenuecat: { webhookAuth: process.env.REVENUECAT_WEBHOOK_AUTH! },
+  revenuecat: {
+    webhookAuth: process.env.REVENUECAT_WEBHOOK_AUTH!,
+    // develop 環境の Functions でのみ true にする（既定 false）
+    allowSandbox: process.env.REVENUECAT_ALLOW_SANDBOX === 'true',
+  },
   syncClaims: process.env.SYNC_SUBSCRIPTION_CLAIMS === 'true',
   onSubscriptionDowngraded: async (uid) => {
     // 無料プランの制限にデータを収める後始末をここに書く
@@ -43,10 +47,34 @@ export async function POST(req: Request) {
 }
 ```
 
+### RevenueCat の環境
+
+Webhook の `environment` が `SANDBOX` のイベントは、既定では**適用せず 200 を返す**。
+TestFlight や開発ビルドが本番の Webhook URL を叩いたときに、サンドボックス購入で
+本番の権利が付くのを防ぐため。開発環境の Functions では `allowSandbox: true` にする。
+
+`TRANSFER`（権利が別の `app_user_id` へ移った）は、`transferred_from` の各ユーザーを
+`expired` にする。移った先は後続の購入・更新イベントで `active` になる。
+
+### Checkout とプラン変更
+
+`createCheckoutSession` は **新規契約のみ**を扱う。既に有効な購読を持つユーザーには
+409 を返すので、プラン変更・解約・支払い方法の更新は `createPortalSession`
+（Stripe カスタマーポータル）へ誘導する。Checkout は重複を防がないため、
+有効なまま再度作らせると同一顧客に 2 本目のサブスクリプションが作られる。
+
 権利判定だけなら factory 不要:
 
 ```ts
 import { isSubscriptionActive, hasPlan } from '@geckou/billing'
+```
+
+**ブラウザ（クライアントコンポーネント）からはサブパスを使う。**
+ルートは Webhook の署名検証で Node の `crypto` を読むため、バンドルに入ってしまう。
+
+```ts
+import { isSubscriptionActive } from '@geckou/billing/entitlement'
+import type { Subscription } from '@geckou/billing/entitlement'
 ```
 
 ## 設計方針

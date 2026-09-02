@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+//
+// **このファイルの正は geckou/project-starter/scripts/check-api-diff.mjs。**
+// geckou/kit・geckou/ui にも同じものがあるが、直すときはまずここを直してから配ること
+// （3 リポジトリで中身が同じであることを install-release-command.sh が前提にしている）。
 // 公開済みのパッケージと、これから公開するものの「型定義の差分」を見る。
 //
 //   node scripts/check-api-diff.mjs <パッケージのディレクトリ名>

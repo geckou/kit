@@ -1,5 +1,8 @@
 name: Publish package
 
+# **このファイルの正は geckou/project-starter/.github/workflows/publish.yml。**
+# 直すときはまずそちらを直してから配ること。
+#
 # geckou/ui と同じタグ駆動。<パッケージのディレクトリ名>@<バージョン>（例: billing@0.1.0）
 #
 # **公開できるのは production に入っているコミットだけ。** タグも workflow_dispatch も
@@ -39,7 +42,7 @@ jobs:
     environment: npm-publish
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # production との包含関係を見るため、履歴を持ってチェックアウトする
           fetch-depth: 0
@@ -90,6 +93,12 @@ jobs:
             exit 1
           fi
 
+          # パスは環境変数で渡す（node の式に文字列として展開しない）
+          if [ "$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).private === true')" = "true" ]; then
+            echo "::error::packages/$PACKAGE は private です（公開対象ではありません）"
+            exit 1
+          fi
+
           # タグ起動のときは、タグのバージョン部分と package.json の version の一致を見る。
           # ずれていると、タグが指すものと実際に公開されるものが食い違う
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
@@ -105,7 +114,7 @@ jobs:
 
           echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           # Trusted Publishing は Node >= 22.14.0 を要求する。範囲で書くのは、
           # `22` だとランナーのツールキャッシュ次第で 22.14 未満が選ばれうるため

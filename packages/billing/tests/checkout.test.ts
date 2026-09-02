@@ -129,7 +129,9 @@ describe('createCheckoutSession', () => {
     })
 
     expect(mockCustomersCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ metadata: { uid: 'user-1' } })
+      expect.objectContaining({ metadata: { uid: 'user-1' } }),
+      // 二重送信で顧客が重複しないよう uid をキーにする
+      { idempotencyKey: 'customer_user-1' }
     )
     expect(mockSaveStripeCustomerId).toHaveBeenCalledWith(
       expect.anything(),
@@ -159,8 +161,64 @@ describe('createCheckoutSession', () => {
 
     expect(result.status).toBe(200)
     expect(mockCustomersCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ email: undefined })
+      expect.objectContaining({ email: undefined }),
+      { idempotencyKey: 'customer_user-1' }
     )
+  })
+
+  // 回帰: 既存の購読状態を見ておらず、有効なユーザーが再度呼ぶと
+  // 同一顧客に 2 本目のサブスクリプションが作られていた
+  it('有効な購読があれば 409 を返す', async () => {
+    const config = createConfig()
+    config.store.set('users/user-1', {
+      subscription: { status: 'active', source: 'stripe' },
+    })
+
+    const result = await createCheckoutSession(config, {
+      uid: 'user-1',
+      priceId: 'price_allowed',
+    })
+
+    expect(result.status).toBe(409)
+    expect(mockCheckoutCreate).not.toHaveBeenCalled()
+  })
+
+  it('失効済みなら Checkout を作れる', async () => {
+    const config = createConfig()
+    config.store.set('users/user-1', {
+      subscription: { status: 'expired', source: 'stripe' },
+    })
+
+    const result = await createCheckoutSession(config, {
+      uid: 'user-1',
+      priceId: 'price_allowed',
+    })
+
+    expect(result.status).toBe(200)
+  })
+
+  // 回帰: ダブルクリック・複数タブで customers.create が 2 回呼ばれ、
+  // 保存される顧客 ID が実際に決済した顧客と食い違っていた
+  it('同時に 2 回呼んでも同じ idempotencyKey で顧客を作る', async () => {
+    mockGetStripeCustomerId.mockResolvedValue(undefined)
+    mockCustomersCreate.mockResolvedValue({ id: 'cus_new' })
+
+    const config = createConfig()
+    await Promise.all([
+      createCheckoutSession(config, {
+        uid: 'user-1',
+        priceId: 'price_allowed',
+      }),
+      createCheckoutSession(config, {
+        uid: 'user-1',
+        priceId: 'price_allowed',
+      }),
+    ])
+
+    expect(mockCustomersCreate).toHaveBeenCalledTimes(2)
+    for (const call of mockCustomersCreate.mock.calls) {
+      expect(call[1]).toEqual({ idempotencyKey: 'customer_user-1' })
+    }
   })
 
   it('Stripe API がエラーなら 500 を返す', async () => {

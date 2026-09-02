@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#
+# **このファイルの正は geckou/project-starter/scripts/install-release-command.sh。**
+# geckou/kit・geckou/ui にも同じものがあるが、直すときはまずここを直してから配ること
+# （3 リポジトリで中身が同じであることを install-release-command.sh が前提にしている）。
 # geckou-release をどこからでも実行できるようにする。
 #
 #   bash scripts/install-release-command.sh

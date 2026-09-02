@@ -69,4 +69,23 @@ describe('initFirebase', () => {
     expect(createAuth).toHaveBeenCalledWith({ __app: config })
     expect(result.auth).toBe(custom)
   })
+
+  // 回帰: 2 回目も createAuth を呼んでいたため、React Native の
+  // initializeAuth + getReactNativePersistence が auth/already-initialized で
+  // throw していた（Fast Refresh、複数モジュールからの呼び出し）
+  it('2 回目は createAuth を呼ばず getAuth を返す', () => {
+    const custom = { __auth: 'custom' } as never
+    const createAuth = vi.fn(() => custom)
+
+    initFirebase(config, createAuth)
+    expect(createAuth).toHaveBeenCalledTimes(1)
+
+    // 1 回目で app が作られた状態を再現する
+    app.getApps.mockReturnValue([{ __app: config }])
+    const result = initFirebase(config, createAuth)
+
+    expect(createAuth).toHaveBeenCalledTimes(1)
+    expect(auth.getAuth).toHaveBeenCalledWith({ __app: config })
+    expect(result.auth).toEqual({ __auth: { __app: config } })
+  })
 })

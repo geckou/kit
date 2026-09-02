@@ -4,7 +4,7 @@
 プロダクト非依存のパッケージ群。テンプレートに同梱すると Template Sync で配布されない問題
 （[project-starter#92](https://github.com/geckou/project-starter/issues/92) /
 [#105](https://github.com/geckou/project-starter/issues/105)）への対応として、
-npm パッケージとして切り出し、修正が Dependabot の bump PR として派生プロジェクトへ届くようにする。
+npm パッケージとして切り出し、修正が Renovate の更新 PR として派生プロジェクトへ届くようにする。
 
 UI コンポーネントは [`geckou/ui`](https://github.com/geckou/ui)（`@geckou/ui-react` 等）が担当。
 このリポジトリはロジック側（決済・認証・共有ユーティリティ）を扱う。
@@ -41,6 +41,10 @@ yarn release billing firebase-client firebase-server
 ```
 
 `<ディレクトリ名>@<バージョン>` 形式のタグを push すると `publish.yml` が npm へ公開する。
+
+コミットメッセージは commitlint が検証し、**規約違反はコミットをブロックする**
+（`.husky/commit-msg`）。派生プロジェクト向けのテンプレート（geckou/project-starter）は
+警告のみだが、このリポジトリはリリース単位が `git log` の可読性に直結するため止める。
 
 #### どこからでも実行する
 

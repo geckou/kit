@@ -17,6 +17,7 @@
   },
   "scripts": {
     "build": "yarn workspaces run build",
+    "check:optional-peer-types": "bash scripts/check-optional-peer-types.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "yarn workspaces run lint",
@@ -31,7 +32,7 @@
   "devDependencies": {
     "@commitlint/cli": "^21",
     "@geckou/commitlint-config": "^0.1.1",
-    "@geckou/eslint-config": "^0.1.1",
+    "@geckou/eslint-config": "^0.3.0",
     "@geckou/prettier-config": "^0.1.1",
     "@types/node": "^22.20.1",
     "eslint": "^9",

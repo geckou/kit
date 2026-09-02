@@ -30,6 +30,16 @@ function extractUid(subscription: Stripe.Subscription): string | undefined {
   return typeof uid === 'string' && uid !== '' ? uid : undefined
 }
 
+/**
+ * 同じ秒に生成されるイベントの序列。event.created は秒精度で配信順も保証されないため、
+ * 日時が同じときはこの値で前後を決める（created → updated → deleted）
+ */
+const SUBSCRIPTION_EVENT_SEQUENCE = {
+  'customer.subscription.created': 0,
+  'customer.subscription.updated': 1,
+  'customer.subscription.deleted': 2,
+} as const
+
 function headerValue(
   headers: WebhookRequest['headers'],
   name: string
@@ -118,11 +128,19 @@ export async function handleStripeWebhook(
             ? 'expired'
             : mapStripeStatus(subscription.status)
 
+        if (status === null) {
+          console.log(
+            `Stripe event ${event.id} does not change entitlement: ${subscription.status}`
+          )
+          break
+        }
+
         const result = await applySubscriptionEvent(config, {
           eventId: event.id,
           source: 'stripe',
           uid,
           occurredAt,
+          sequence: SUBSCRIPTION_EVENT_SEQUENCE[event.type],
           subscription: {
             status,
             source: 'stripe',

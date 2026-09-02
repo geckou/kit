@@ -14,7 +14,14 @@ type RevenueCatEvent = {
     app_user_id: string
     event_timestamp_ms?: number
     expiration_at_ms?: number
+    /** BILLING_ISSUE のときの猶予期間終了。expiration_at_ms は元の期間終了（ほぼ今） */
+    grace_period_expiration_at_ms?: number
     entitlement_ids?: string[]
+    environment?: string
+    /** TRANSFER で権利を失う側の app_user_id */
+    transferred_from?: string[]
+    /** TRANSFER で権利を受け取る側の app_user_id */
+    transferred_to?: string[]
   }
 }
 
@@ -54,6 +61,55 @@ function verifyAuthorization(
   return crypto.timingSafeEqual(received, secret)
 }
 
+/**
+ * TRANSFER（権利が別の app_user_id へ移った）を処理する。
+ *
+ * 元のユーザーを expired にしないと active が残り続ける。移った先は
+ * 続けて届く購入・更新イベントで active になるため、ここでは警告のみ出す
+ * （このイベントだけでは、どの期間の権利かが決まらない）。
+ */
+async function handleTransfer(
+  config: ResolvedConfig,
+  event: RevenueCatEvent['event']
+): Promise<HttpResult> {
+  const eventId = buildEventId(event)
+  const occurredAtMs = asFiniteNumber(event.event_timestamp_ms)
+  const occurredAt = occurredAtMs !== null ? new Date(occurredAtMs) : new Date()
+
+  const from = Array.isArray(event.transferred_from)
+    ? event.transferred_from.filter(
+        (uid): uid is string => typeof uid === 'string' && uid !== ''
+      )
+    : []
+
+  if (Array.isArray(event.transferred_to) && event.transferred_to.length > 0) {
+    console.warn(
+      `RevenueCat TRANSFER to ${event.transferred_to.join(', ')}: 権利は後続の購入・更新イベントで反映される`
+    )
+  }
+
+  try {
+    for (const uid of from) {
+      await applySubscriptionEvent(config, {
+        // uid ごとに別イベントとして記録する（同じキーだと 2 件目が duplicate になる）
+        eventId: `${eventId}:from:${uid}`,
+        source: 'revenuecat',
+        uid,
+        occurredAt,
+        subscription: {
+          status: 'expired',
+          source: 'revenuecat',
+        },
+      })
+    }
+  } catch (error) {
+    console.error('Failed to process RevenueCat transfer', error)
+    return { status: 500, body: { error: 'Internal error' } }
+  }
+
+  return { status: 200, body: { received: true } }
+}
+
 export async function handleRevenueCatWebhook(
   config: ResolvedConfig,
   req: WebhookRequest
@@ -87,6 +143,23 @@ export async function handleRevenueCatWebhook(
     return { status: 400, body: { error: 'Invalid payload' } }
   }
 
+  // TestFlight / 開発ビルドが本番の Webhook URL を叩くと、サンドボックス購入で
+  // 本番の権利が付いてしまう。既定では適用せず、ログだけ残す
+  if (
+    event.environment === 'SANDBOX' &&
+    config.revenuecat?.allowSandbox !== true
+  ) {
+    console.log(
+      `Ignored RevenueCat SANDBOX event: ${event.type} (${event.app_user_id})`
+    )
+    return { status: 200, body: { received: true } }
+  }
+
+  // 権利が別の app_user_id へ移った。元のユーザーの active を残さない
+  if (event.type === 'TRANSFER') {
+    return handleTransfer(config, event)
+  }
+
   const status = mapRevenueCatStatus(event.type)
   if (!status) {
     console.log(`Unhandled RevenueCat event: ${event.type}`)
@@ -95,7 +168,13 @@ export async function handleRevenueCatWebhook(
 
   const eventId = buildEventId(event)
   const occurredAtMs = asFiniteNumber(event.event_timestamp_ms)
-  const expirationMs = asFiniteNumber(event.expiration_at_ms)
+
+  // BILLING_ISSUE の expiration_at_ms は元の期間終了（ほぼ今）を指す。
+  // ストア側の猶予期間（Apple は最大 16 日）は別フィールドにあるため、
+  // そちらを優先しないと in_grace_period になった直後に利用不可になる
+  const expirationMs =
+    asFiniteNumber(event.grace_period_expiration_at_ms) ??
+    asFiniteNumber(event.expiration_at_ms)
   const planId = Array.isArray(event.entitlement_ids)
     ? event.entitlement_ids.find((id) => typeof id === 'string')
     : undefined

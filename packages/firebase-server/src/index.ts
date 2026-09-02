@@ -8,6 +8,7 @@ export {
 export {
   sendPushNotification,
   sendPushNotificationBatch,
+  type BatchPushResult,
   type MessagingLike,
   type PushNotificationPayload,
 } from './messaging.js'
