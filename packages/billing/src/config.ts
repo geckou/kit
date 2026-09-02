@@ -27,9 +27,7 @@ export type StripeClientLike = {
   }
   checkout: {
     sessions: {
-      create(
-        params: Record<string, unknown>
-      ): Promise<{ url?: string | null }>
+      create(params: Record<string, unknown>): Promise<{ url?: string | null }>
     }
   }
   billingPortal: {

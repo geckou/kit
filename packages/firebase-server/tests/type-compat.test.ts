@@ -3,7 +3,10 @@ import type { RequestHandler } from 'express'
 import type { Auth } from 'firebase-admin/auth'
 import type { Messaging } from 'firebase-admin/messaging'
 
-import { createRequireAuth, type TokenVerifierLike } from '../src/auth-middleware'
+import {
+  createRequireAuth,
+  type TokenVerifierLike,
+} from '../src/auth-middleware'
 import type { MessagingLike } from '../src/messaging'
 
 /**

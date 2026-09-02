@@ -17,7 +17,11 @@ import {
   saveStripeCustomerId,
   syncSubscriptionClaims,
 } from './subscription.js'
-import type { Subscription, SubscriptionEvent, WebhookRequest } from './types.js'
+import type {
+  Subscription,
+  SubscriptionEvent,
+  WebhookRequest,
+} from './types.js'
 
 // 純粋関数・型は factory を介さず直接使える
 export { hasPlan, isSubscriptionActive } from './entitlement.js'

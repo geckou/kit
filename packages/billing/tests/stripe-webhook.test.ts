@@ -34,7 +34,9 @@ function createConfig(overrides: Record<string, unknown> = {}) {
   })
 }
 
-function createRequest(overrides: Partial<WebhookRequest> = {}): WebhookRequest {
+function createRequest(
+  overrides: Partial<WebhookRequest> = {}
+): WebhookRequest {
   return {
     rawBody: Buffer.from('{}'),
     headers: { 'stripe-signature': 'sig_test' },

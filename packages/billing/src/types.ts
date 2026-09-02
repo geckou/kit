@@ -10,10 +10,7 @@
  * - expired         失効（利用不可）
  */
 export type SubscriptionStatus =
-  | 'active'
-  | 'in_grace_period'
-  | 'cancelled'
-  | 'expired'
+  'active' | 'in_grace_period' | 'cancelled' | 'expired'
 
 /** 購入経路 */
 export type SubscriptionSource = 'stripe' | 'revenuecat'

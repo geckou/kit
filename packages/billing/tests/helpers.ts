@@ -93,7 +93,9 @@ export function createFakeFirestore(): FakeFirestore {
   return { firestore, store }
 }
 
-export function createFakeAuth(overrides: Partial<Record<string, unknown>> = {}) {
+export function createFakeAuth(
+  overrides: Partial<Record<string, unknown>> = {}
+) {
   const getUser = vi.fn().mockResolvedValue({
     email: 'user@example.com',
     customClaims: undefined,
