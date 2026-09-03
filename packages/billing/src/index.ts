@@ -30,6 +30,7 @@ export type { BillingConfig, StripeClientLike } from './config.js'
 export type {
   ApplyResult,
   ApplyStatus,
+  DateLike,
   HttpResult,
   Subscription,
   SubscriptionEvent,

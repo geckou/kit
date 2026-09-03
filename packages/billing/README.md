@@ -98,6 +98,20 @@ import type { Subscription } from '@geckou/billing/entitlement'
 経路ごとに権利を保持して OR を取る形にはしていない（`Subscription` の形が変わるため）。
 両経路の購入を UI から防ぎたい場合は、IAP の購入画面側でも権利を確認すること。
 
+### 日時の型（Date と Timestamp）
+
+`Subscription` の日時（`currentPeriodEnd` / `lastEventAt` / `updatedAt`）は
+書き込むときは `Date` だが、`users/{uid}.subscription` を Firestore から読み出すと
+`Timestamp` になる。公開型は両方を受ける `DateLike` にしてあるので、
+**値を使うときは export 済みの `toDate()` を通すこと**。
+
+```ts
+import { toDate, type Subscription } from '@geckou/billing/entitlement'
+
+const subscription = snapshot.get('subscription') as Subscription | undefined
+const periodEnd = toDate(subscription?.currentPeriodEnd) // Date | null
+```
+
 ## 設計方針
 
 - `process.env` を読まない（設定は全て `createBilling` の config で注入）

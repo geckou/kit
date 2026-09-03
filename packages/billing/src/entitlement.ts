@@ -3,14 +3,11 @@ import type { Subscription } from './types.js'
 // クライアント（ブラウザ）からは、このモジュールだけを import すれば
 // 権利判定と関連型が揃うようにする（ルートは Node 専用の crypto を含むため）
 export type {
+  DateLike,
   Subscription,
   SubscriptionSource,
   SubscriptionStatus,
 } from './types.js'
-
-// Firestore から読み出した日時は Timestamp 型になるため、
-// Date と Timestamp（toDate を持つオブジェクト）の両方を受け付ける
-type DateLike = Date | { toDate: () => Date }
 
 export function toDate(value: unknown): Date | null {
   if (value instanceof Date) return value
@@ -46,13 +43,13 @@ export function isSubscriptionActive(
     // 猶予期間は有限。currentPeriodEnd を持っている場合はそれを超えたら無効。
     // 日時が無い場合は従来どおり有効扱い（Webhook を正とするフォールバック）
     case 'in_grace_period': {
-      const periodEnd = toDate(subscription.currentPeriodEnd as DateLike)
+      const periodEnd = toDate(subscription.currentPeriodEnd)
       if (periodEnd === null) return true
       return periodEnd.getTime() > now.getTime()
     }
 
     case 'cancelled': {
-      const periodEnd = toDate(subscription.currentPeriodEnd as DateLike)
+      const periodEnd = toDate(subscription.currentPeriodEnd)
       return periodEnd !== null && periodEnd.getTime() > now.getTime()
     }
 

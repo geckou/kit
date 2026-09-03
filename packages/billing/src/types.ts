@@ -15,6 +15,13 @@ export type SubscriptionStatus =
 /** 購入経路 */
 export type SubscriptionSource = 'stripe' | 'revenuecat'
 
+/**
+ * 日時。書き込むときは Date だが、Firestore から読み出すと Timestamp になる。
+ * `users/{uid}.subscription` をそのまま Subscription として扱えるよう、
+ * 公開型は両方を受ける。値を使うときは `toDate()` を通すこと
+ */
+export type DateLike = Date | { toDate: () => Date }
+
 export type Subscription = {
   status: SubscriptionStatus
   /** どの経路で購入されたか */
@@ -22,13 +29,13 @@ export type Subscription = {
   /** プラン識別子（Stripe は price ID、RevenueCat は entitlement ID） */
   planId?: string
   /** 現在の課金期間の終了日時。cancelled でもこの日時までは利用可 */
-  currentPeriodEnd?: Date
+  currentPeriodEnd?: DateLike
   /** 期間終了時に解約されるか */
   cancelAtPeriodEnd?: boolean
-  updatedAt: Date
+  updatedAt: DateLike
   /** 冪等性・順序制御用（Webhook が書き込む） */
   lastEventId?: string
-  lastEventAt?: Date
+  lastEventAt?: DateLike
   /** 同じ occurredAt のイベントを並べるための序列（→ SubscriptionEvent.sequence） */
   lastEventSequence?: number
 }
