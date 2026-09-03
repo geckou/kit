@@ -1,6 +1,6 @@
 {
   "name": "@geckou/billing",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Subscription entitlement and webhook handling (Stripe / RevenueCat) for Firebase-based projects",
   "type": "commonjs",
   "main": "./dist/index.js",
@@ -37,7 +37,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "type-check": "tsc -p tsconfig.json --noEmit",
+    "type-check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",

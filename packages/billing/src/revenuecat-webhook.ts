@@ -64,9 +64,12 @@ function verifyAuthorization(
 /**
  * TRANSFER（権利が別の app_user_id へ移った）を処理する。
  *
- * 元のユーザーを expired にしないと active が残り続ける。移った先は
- * 続けて届く購入・更新イベントで active になるため、ここでは警告のみ出す
- * （このイベントだけでは、どの期間の権利かが決まらない）。
+ * 元のユーザーを expired にしないと active が残り続ける。
+ *
+ * 移動先は TRANSFER のペイロードだけでは決まらない（期限も entitlement も
+ * 乗らない）。config.revenuecat.fetchSubscriber があれば、そこで現在の権利を
+ * 取り直して反映する。無ければ警告のみで、次の購入・更新イベントまで
+ * 「未購読」扱いのままになる（年額なら最長 1 年）
  */
 async function handleTransfer(
   config: ResolvedConfig,
@@ -82,9 +85,17 @@ async function handleTransfer(
       )
     : []
 
-  if (Array.isArray(event.transferred_to) && event.transferred_to.length > 0) {
+  const to = Array.isArray(event.transferred_to)
+    ? event.transferred_to.filter(
+        (uid): uid is string => typeof uid === 'string' && uid !== ''
+      )
+    : []
+
+  const fetchSubscriber = config.revenuecat?.fetchSubscriber
+
+  if (to.length > 0 && !fetchSubscriber) {
     console.warn(
-      `RevenueCat TRANSFER to ${event.transferred_to.join(', ')}: 権利は後続の購入・更新イベントで反映される`
+      `RevenueCat TRANSFER to ${to.join(', ')}: 権利は後続の購入・更新イベントまで反映されない（revenuecat.fetchSubscriber を設定すると取り直せる）`
     )
   }
 
@@ -101,6 +112,38 @@ async function handleTransfer(
           source: 'revenuecat',
         },
       })
+    }
+
+    // 移動先の権利を取り直す。取得に失敗しても移動元の失効は確定させたいので、
+    // ここでの失敗は Webhook を 500 にしない（RevenueCat に再送させても
+    // 移動元は duplicate になるだけで、移動先の取得が成功する保証もない）
+    if (fetchSubscriber) {
+      for (const uid of to) {
+        try {
+          const subscription = await fetchSubscriber(uid)
+
+          if (!subscription) {
+            console.warn(
+              `RevenueCat TRANSFER to ${uid}: 有効な権利がありません`
+            )
+            continue
+          }
+
+          await applySubscriptionEvent(config, {
+            eventId: `${eventId}:to:${uid}`,
+            source: 'revenuecat',
+            uid,
+            occurredAt,
+            // source はフックに決めさせない（config.ts の注意書きを参照）
+            subscription: { ...subscription, source: 'revenuecat' },
+          })
+        } catch (error) {
+          console.error(
+            `Failed to restore the transferred entitlement for ${uid}`,
+            error
+          )
+        }
+      }
     }
   } catch (error) {
     console.error('Failed to process RevenueCat transfer', error)

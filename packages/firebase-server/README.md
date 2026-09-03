@@ -48,6 +48,17 @@ app.get('/me', requireAuth, (req, res) => {
 `Authorization: Bearer <ID トークン>` を検証し、トークンが無い・不正な場合は
 `401 { "error": "Unauthorized" }` を返してハンドラへ進まない。
 
+⚠️ **`next()` は try の外で呼ぶ実装になっている**（中で呼ぶと後続ハンドラの
+同期例外まで 401 に化けるため）。その代わり、後続ハンドラが投げた例外は
+このミドルウェアの Promise の reject として外へ出る。**Express 4 は async
+ミドルウェアの reject を捕まえない**ので、`express-async-errors` を読み込むか
+Express 5 を使うこと。捕まえないままだと unhandledRejection になり、
+クライアントへレスポンスが返らない。
+
+```ts
+import 'express-async-errors' // Express 4 のみ必要
+```
+
 ## プッシュ通知（FCM）
 
 ```ts

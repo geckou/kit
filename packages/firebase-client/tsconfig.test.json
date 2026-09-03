@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // テストは vitest が ESM として読み込む。src と同じ nodenext のままだと
+    // トップレベル await（vi.mock を効かせるための動的 import）が CommonJS 扱いで
+    // エラーになるため、テストの型チェックだけ ESM 前提にする
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src", "tests"]
+}

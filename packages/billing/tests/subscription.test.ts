@@ -173,6 +173,188 @@ describe('applySubscriptionEvent', () => {
     expect(store.has('billing_events/revenuecat_evt_1')).toBe(true)
   })
 
+  // 回帰: users/{uid}.subscription は 1 スロットしかなく、経路が違う購読が
+  // そこを取り合う。日時だけで前後を決めると、後から届いた別経路の失効が
+  // 生きている権利を消してしまう
+  it('別経路からのダウングレードで有効な権利を上書きしない', async () => {
+    await applySubscriptionEvent(config, createEvent())
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_expired',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-05T00:00:00Z'),
+        subscription: {
+          status: 'expired' as const,
+          source: 'revenuecat' as const,
+        },
+      })
+    )
+
+    expect(result.status).toBe('ignored')
+    expect(result.isActive).toBe(true)
+    expect(readSubscription('user-1')).toMatchObject({
+      status: 'active',
+      source: 'stripe',
+    })
+    expect(mockOnDowngraded).not.toHaveBeenCalled()
+  })
+
+  it('逆向き（RevenueCat 有効 → Stripe の失効）も上書きしない', async () => {
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_active',
+        source: 'revenuecat' as const,
+        subscription: {
+          status: 'active' as const,
+          source: 'revenuecat' as const,
+        },
+      })
+    )
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_stripe_expired',
+        occurredAt: new Date('2026-08-05T00:00:00Z'),
+        subscription: {
+          status: 'expired' as const,
+          source: 'stripe' as const,
+        },
+      })
+    )
+
+    expect(result.status).toBe('ignored')
+    expect(readSubscription('user-1')).toMatchObject({
+      status: 'active',
+      source: 'revenuecat',
+    })
+  })
+
+  // 回帰: 別経路の「まだ有効」がスロットを奪い、その後で同一経路の失効が通ると、
+  // 生きている Stripe の権利が消えていた（ガードが「有効 → 無効」しか見ていなかった）
+  it('別経路の弱い（期限が手前の）権利でスロットを奪わせない', async () => {
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        subscription: {
+          status: 'active' as const,
+          source: 'stripe' as const,
+          currentPeriodEnd: new Date('2099-01-01T00:00:00Z'),
+        },
+      })
+    )
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_cancelled',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-05T00:00:00Z'),
+        subscription: {
+          status: 'cancelled' as const,
+          source: 'revenuecat' as const,
+          currentPeriodEnd: new Date('2098-01-01T00:00:00Z'),
+        },
+      })
+    )
+
+    expect(result.status).toBe('ignored')
+    expect(readSubscription('user-1')).toMatchObject({
+      status: 'active',
+      source: 'stripe',
+    })
+
+    // 奪われていなければ、続く同一経路の失効も「別経路」として弾かれる
+    const expired = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_expired',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-06T00:00:00Z'),
+        subscription: {
+          status: 'expired' as const,
+          source: 'revenuecat' as const,
+        },
+      })
+    )
+
+    expect(expired.isActive).toBe(true)
+    expect(mockOnDowngraded).not.toHaveBeenCalled()
+  })
+
+  it('別経路でも期限が後ろへ伸びるならスロットを渡す', async () => {
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        subscription: {
+          status: 'active' as const,
+          source: 'stripe' as const,
+          currentPeriodEnd: new Date('2098-01-01T00:00:00Z'),
+        },
+      })
+    )
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_longer',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-05T00:00:00Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'revenuecat' as const,
+          currentPeriodEnd: new Date('2099-01-01T00:00:00Z'),
+        },
+      })
+    )
+
+    expect(result.status).toBe('applied')
+    expect(readSubscription('user-1').source).toBe('revenuecat')
+  })
+
+  it('同じ経路のダウングレードはこれまでどおり適用する', async () => {
+    await applySubscriptionEvent(config, createEvent())
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_stripe_expired',
+        occurredAt: new Date('2026-08-05T00:00:00Z'),
+        subscription: {
+          status: 'expired' as const,
+          source: 'stripe' as const,
+        },
+      })
+    )
+
+    expect(result.status).toBe('applied')
+    expect(readSubscription('user-1').status).toBe('expired')
+    expect(mockOnDowngraded).toHaveBeenCalled()
+  })
+
+  it('別経路でも有効 → 有効の切り替えは適用する', async () => {
+    await applySubscriptionEvent(config, createEvent())
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_active',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-05T00:00:00Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'revenuecat' as const,
+        },
+      })
+    )
+
+    expect(result.status).toBe('applied')
+    expect(readSubscription('user-1').source).toBe('revenuecat')
+  })
+
   it('反映済みより古いイベントで上書きしない', async () => {
     store.set('users/user-1', {
       subscription: {

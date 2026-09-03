@@ -1,7 +1,33 @@
+import crypto from 'node:crypto'
+
 import type { ResolvedConfig } from './config.js'
 import { isSubscriptionActive } from './entitlement.js'
 import { getStripeCustomerId, saveStripeCustomerId } from './subscription.js'
 import type { HttpResult, Subscription } from './types.js'
+
+/**
+ * Checkout セッションの idempotencyKey に使う時間窓。
+ * 短すぎると二重送信を取りこぼし、長すぎるとキャンセル後の作り直しが
+ * 同じセッションに戻ってしまう。
+ *
+ * ⚠️ 窓の境界をまたいだ二重送信は取りこぼす（確率的な防御）。
+ * Firestore のロックではないので、確実性が要るなら利用側でボタンを無効化すること
+ */
+const CHECKOUT_IDEMPOTENCY_WINDOW_MS = 10 * 60 * 1000
+
+/**
+ * idempotencyKey に混ぜるパラメータの指紋。
+ *
+ * Stripe は「同じキー + 異なるパラメータ」に `idempotency_error`（400）を返し、
+ * そのキーは 24 時間残る。パラメータをキーに畳み込んでおけば衝突自体が起きない。
+ */
+function fingerprint(value: unknown): string {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(value))
+    .digest('hex')
+    .slice(0, 16)
+}
 
 /**
  * uid に対応する Stripe 顧客を取得する。無ければ作成して保存する。
@@ -28,10 +54,18 @@ async function findOrCreateCustomer(
   // 二重送信（ダブルクリック・複数タブ）で顧客が 2 つ作られると、保存した ID と
   // 実際に決済された顧客が食い違い、ポータルから解約できなくなる。
   // 同じキーなら Stripe が同じ顧客を返す
-  const customer = await stripe.client.customers.create(
-    { email, metadata: { uid } },
-    { idempotencyKey: `customer_${uid}` }
-  )
+  const params = { email, metadata: { uid } }
+
+  // キーを `customer_${uid}` に固定すると、1 回目に email の取得が失敗し
+  // （undefined で作成）その後の保存も失敗したとき、再試行は email 付きの
+  // 別パラメータで同じキーを送るため 24 時間ずっと 400 になり自力で抜けられない。
+  // かといってキーなしで作り直すと、このキーが防いでいる二重送信の重複顧客が
+  // 復活する。パラメータを指紋にしてキーへ畳み込めば、衝突せず、
+  // かつ同じパラメータの同時送信は 1 顧客にまとまる
+  const customer = await stripe.client.customers.create(params, {
+    idempotencyKey: `customer_${uid}_${fingerprint(params)}`,
+  })
+
   await saveStripeCustomerId(config, uid, customer.id)
 
   return customer.id
@@ -94,7 +128,14 @@ export async function createCheckoutSession(
     }
 
     const customerId = await findOrCreateCustomer(config, input.uid)
-    const session = await stripe.client.checkout.sessions.create({
+
+    // 上の 409 判定と作成の間にロックは無いため、同時に呼ぶと両方が判定を
+    // 通過して Checkout が 2 本できる。同じキーなら Stripe が同じセッションを
+    // 返すので、実質 1 本になる。
+    // キャンセル後の作り直しは許したいので、時間窓（CHECKOUT_IDEMPOTENCY_WINDOW_MS）
+    // をキーに含める
+    const windowIndex = Math.floor(Date.now() / CHECKOUT_IDEMPOTENCY_WINDOW_MS)
+    const sessionParams = {
       mode: 'subscription',
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
@@ -104,7 +145,17 @@ export async function createCheckoutSession(
       subscription_data: { metadata: { uid: input.uid } },
       success_url: successUrl,
       cancel_url: cancelUrl,
-    })
+    }
+
+    // 顧客 ID もパラメータに含まれるため、キーには指紋を混ぜる。
+    // 固定キーのままだと、customerId が変わった直後に同じキー・別パラメータで
+    // idempotency_error（400）になり、利用者には 500 が返る
+    const session = await stripe.client.checkout.sessions.create(
+      sessionParams,
+      {
+        idempotencyKey: `checkout:${input.uid}:${windowIndex}:${fingerprint(sessionParams)}`,
+      }
+    )
 
     if (!session.url) {
       return { status: 500, body: { error: 'Checkout session has no URL' } }
