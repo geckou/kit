@@ -82,6 +82,22 @@ import { isSubscriptionActive } from '@geckou/billing/entitlement'
 import type { Subscription } from '@geckou/billing/entitlement'
 ```
 
+### 同一ユーザーが両経路で購入した場合
+
+`users/{uid}.subscription` は 1 スロットしか持たないため、Stripe と RevenueCat の
+購読は同じ場所を取り合う。Checkout の 409 は Stripe 側の重複しか防がず、
+アプリ内課金（IAP）はゲートできないので、両方で購入された状態は起こりうる。
+
+このとき**別経路からのダウングレード（有効 → 無効）は適用しない**。日時と
+`sequence` だけで前後を決めると、Stripe が有効なまま IAP を買ったユーザーに後日
+届く RevenueCat の `EXPIRATION` が Stripe の `active` を `expired` で上書きし、
+`onSubscriptionDowngraded` まで呼ばれてしまうため。無視したイベントは
+`applied: false` で記録し、警告をログに出す（`ApplyResult.status` は `stale`）。
+
+**同じ経路のダウングレードと、経路をまたぐ有効 → 有効の切り替えは従来どおり適用する。**
+経路ごとに権利を保持して OR を取る形にはしていない（`Subscription` の形が変わるため）。
+両経路の購入を UI から防ぎたい場合は、IAP の購入画面側でも権利を確認すること。
+
 ## 設計方針
 
 - `process.env` を読まない（設定は全て `createBilling` の config で注入）

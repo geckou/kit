@@ -43,7 +43,12 @@ export async function applySubscriptionEvent(
     lastEventSequence: sequence,
   })
 
+  // トランザクションは再試行されうるので、警告は確定後に 1 回だけ出す
+  let crossSourceDowngrade = false
+
   const result = await db.runTransaction<ApplyResult>(async (transaction) => {
+    crossSourceDowngrade = false
+
     // Firestore のトランザクションは全ての read を write より先に行う必要がある
     const [eventSnapshot, userSnapshot] = await Promise.all([
       transaction.get(eventRef),
@@ -69,17 +74,31 @@ export async function applySubscriptionEvent(
         (lastEventAt.getTime() === event.occurredAt.getTime() &&
           sequence < lastSequence))
 
-    // stale でもイベント自体は記録して、再送のたびに読み直さないようにする
+    // users/{uid}.subscription は 1 スロットしかなく、経路が違う購読はそこを
+    // 取り合う。日時と sequence だけで前後を決めると、Stripe で有効なまま IAP を
+    // 買ったユーザーに後日届く RevenueCat の EXPIRATION（occurredAt は新しい）が
+    // Stripe の active を expired で上書きし、onSubscriptionDowngraded まで呼ばれる。
+    // 別経路からのダウングレードは適用しない（まだ生きている権利のほうが正）
+    // source を持たない古いデータは経路が分からないので対象外にする
+    crossSourceDowngrade =
+      current?.source !== undefined &&
+      current.source !== event.source &&
+      wasActive &&
+      !isSubscriptionActive(next)
+
+    const skip = isStale || crossSourceDowngrade
+
+    // 適用しない場合でもイベント自体は記録して、再送のたびに読み直さないようにする
     transaction.set(eventRef, {
       source: event.source,
       eventId: event.eventId,
       uid: event.uid,
       occurredAt: event.occurredAt,
-      applied: !isStale,
+      applied: !skip,
       processedAt: new Date(),
     })
 
-    if (isStale) {
+    if (skip) {
       return { status: 'stale', wasActive, isActive: wasActive }
     }
 
@@ -99,6 +118,13 @@ export async function applySubscriptionEvent(
       isActive: isSubscriptionActive(next),
     }
   })
+
+  if (crossSourceDowngrade) {
+    console.warn(
+      'Ignored a cross-source subscription downgrade; the active entitlement was kept',
+      { uid: event.uid, eventSource: event.source, eventId: event.eventId }
+    )
+  }
 
   if (result.status === 'applied') {
     await runPostApplyEffects(config, event.uid, next, result)
