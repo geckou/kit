@@ -115,6 +115,11 @@ describe('createCheckoutSession', () => {
         // リダイレクト先はクライアント入力ではなく設定から取る
         success_url: 'https://example.com/billing?status=ok',
         cancel_url: 'https://example.com/billing?status=ng',
+      }),
+      expect.objectContaining({
+        idempotencyKey: expect.stringMatching(
+          /^checkout_user-1_price_allowed_\d+$/
+        ),
       })
     )
   })
@@ -219,6 +224,67 @@ describe('createCheckoutSession', () => {
     for (const call of mockCustomersCreate.mock.calls) {
       expect(call[1]).toEqual({ idempotencyKey: 'customer_user-1' })
     }
+  })
+
+  // 回帰: 409 判定と Checkout 作成の間にロックが無く、二重送信で Checkout が
+  // 2 本作られていた（両方決済すると同一顧客に 2 本目の購読ができる）
+  it('同時に 2 回呼んでも同じ idempotencyKey で Checkout を作る', async () => {
+    const config = createConfig()
+
+    await Promise.all([
+      createCheckoutSession(config, {
+        uid: 'user-1',
+        priceId: 'price_allowed',
+      }),
+      createCheckoutSession(config, {
+        uid: 'user-1',
+        priceId: 'price_allowed',
+      }),
+    ])
+
+    expect(mockCheckoutCreate).toHaveBeenCalledTimes(2)
+
+    const keys = mockCheckoutCreate.mock.calls.map(
+      (call) => (call[1] as { idempotencyKey: string }).idempotencyKey
+    )
+
+    expect(keys[0]).toBe(keys[1])
+  })
+
+  // 回帰: 1 回目に email 取得と保存が失敗すると、再試行が別パラメータ + 同じキーに
+  // なり、Stripe が 24 時間 idempotency_error を返して自力で抜けられなかった
+  it('idempotency_error はキーなしで作り直す', async () => {
+    mockGetStripeCustomerId.mockResolvedValue(undefined)
+    mockCustomersCreate
+      .mockRejectedValueOnce({ type: 'StripeIdempotencyError' })
+      .mockResolvedValueOnce({ id: 'cus_new' })
+
+    const result = await createCheckoutSession(createConfig(), {
+      uid: 'user-1',
+      priceId: 'price_allowed',
+    })
+
+    expect(result.status).toBe(200)
+    expect(mockCustomersCreate).toHaveBeenCalledTimes(2)
+    expect(mockCustomersCreate.mock.calls[1][1]).toBeUndefined()
+    expect(mockSaveStripeCustomerId).toHaveBeenCalledWith(
+      expect.anything(),
+      'user-1',
+      'cus_new'
+    )
+  })
+
+  it('idempotency_error 以外のエラーはそのまま 500 になる', async () => {
+    mockGetStripeCustomerId.mockResolvedValue(undefined)
+    mockCustomersCreate.mockRejectedValue(new Error('Stripe down'))
+
+    const result = await createCheckoutSession(createConfig(), {
+      uid: 'user-1',
+      priceId: 'price_allowed',
+    })
+
+    expect(result.status).toBe(500)
+    expect(mockCustomersCreate).toHaveBeenCalledTimes(1)
   })
 
   it('Stripe API がエラーなら 500 を返す', async () => {

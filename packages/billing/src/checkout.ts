@@ -4,6 +4,30 @@ import { getStripeCustomerId, saveStripeCustomerId } from './subscription.js'
 import type { HttpResult, Subscription } from './types.js'
 
 /**
+ * Checkout セッションの idempotencyKey に使う時間窓。
+ * 短すぎると二重送信を取りこぼし、長すぎるとキャンセル後の作り直しが
+ * 同じセッションに戻ってしまう
+ */
+const CHECKOUT_IDEMPOTENCY_WINDOW_MS = 10 * 60 * 1000
+
+/**
+ * Stripe の idempotency 衝突（同じキーに異なるパラメータ）か。
+ *
+ * Stripe は `idempotency_error`（400）を返し、キーは 24 時間残る。
+ * 型は stripe のメジャー間で壊れやすいので構造だけを見る。
+ */
+function isIdempotencyError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+
+  const candidate = error as { type?: unknown; code?: unknown }
+
+  return (
+    candidate.type === 'StripeIdempotencyError' ||
+    candidate.code === 'idempotency_error'
+  )
+}
+
+/**
  * uid に対応する Stripe 顧客を取得する。無ければ作成して保存する。
  * metadata.uid を入れておくと Stripe ダッシュボードから逆引きできる。
  */
@@ -28,10 +52,28 @@ async function findOrCreateCustomer(
   // 二重送信（ダブルクリック・複数タブ）で顧客が 2 つ作られると、保存した ID と
   // 実際に決済された顧客が食い違い、ポータルから解約できなくなる。
   // 同じキーなら Stripe が同じ顧客を返す
-  const customer = await stripe.client.customers.create(
-    { email, metadata: { uid } },
-    { idempotencyKey: `customer_${uid}` }
-  )
+  const params = { email, metadata: { uid } }
+  let customer
+
+  try {
+    customer = await stripe.client.customers.create(params, {
+      idempotencyKey: `customer_${uid}`,
+    })
+  } catch (error) {
+    if (!isIdempotencyError(error)) throw error
+
+    // 1 回目に email の取得が失敗し（undefined で作成）、その後の
+    // saveStripeCustomerId も失敗すると、再試行では email 付きの別パラメータで
+    // 同じキーを送るため 24 時間ずっと 400 になり、自力で抜けられない。
+    // 顧客が二重にできるリスクより、抜け出せない失敗のほうが重いので、
+    // キーなしで 1 度だけ作り直す
+    console.warn(
+      'Stripe idempotency key conflict; retrying customer creation without a key',
+      { uid }
+    )
+    customer = await stripe.client.customers.create(params)
+  }
+
   await saveStripeCustomerId(config, uid, customer.id)
 
   return customer.id
@@ -94,17 +136,27 @@ export async function createCheckoutSession(
     }
 
     const customerId = await findOrCreateCustomer(config, input.uid)
-    const session = await stripe.client.checkout.sessions.create({
-      mode: 'subscription',
-      customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      // Webhook 側で誰の購入か特定するために uid を両方へ入れる
-      client_reference_id: input.uid,
-      metadata: { uid: input.uid },
-      subscription_data: { metadata: { uid: input.uid } },
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-    })
+
+    // 上の 409 判定と作成の間にロックは無いため、同時に呼ぶと両方が判定を
+    // 通過して Checkout が 2 本できる。同じキーなら Stripe が同じセッションを
+    // 返すので、実質 1 本になる。
+    // キャンセル後の作り直しは許したいので、時間窓（CHECKOUT_IDEMPOTENCY_WINDOW_MS）
+    // をキーに含める
+    const window = Math.floor(Date.now() / CHECKOUT_IDEMPOTENCY_WINDOW_MS)
+    const session = await stripe.client.checkout.sessions.create(
+      {
+        mode: 'subscription',
+        customer: customerId,
+        line_items: [{ price: priceId, quantity: 1 }],
+        // Webhook 側で誰の購入か特定するために uid を両方へ入れる
+        client_reference_id: input.uid,
+        metadata: { uid: input.uid },
+        subscription_data: { metadata: { uid: input.uid } },
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+      },
+      { idempotencyKey: `checkout_${input.uid}_${priceId}_${window}` }
+    )
 
     if (!session.url) {
       return { status: 500, body: { error: 'Checkout session has no URL' } }

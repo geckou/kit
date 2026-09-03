@@ -63,6 +63,11 @@ TestFlight や開発ビルドが本番の Webhook URL を叩いたときに、�
 （Stripe カスタマーポータル）へ誘導する。Checkout は重複を防がないため、
 有効なまま再度作らせると同一顧客に 2 本目のサブスクリプションが作られる。
 
+409 の判定と Checkout の作成の間にロックは無い（Firestore の読みと Stripe の
+作成をまたぐため）。二重送信で判定を同時に通り抜けても Checkout が 2 本に
+ならないよう、作成には `checkout_<uid>_<priceId>_<10 分の時間窓>` を
+idempotencyKey として渡している。キャンセル後の作り直しは次の時間窓で通る。
+
 権利判定だけなら factory 不要:
 
 ```ts

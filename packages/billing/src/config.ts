@@ -31,7 +31,11 @@ export type StripeClientLike = {
   }
   checkout: {
     sessions: {
-      create(params: Record<string, unknown>): Promise<{ url?: string | null }>
+      create(
+        params: Record<string, unknown>,
+        // 二重送信で Checkout が重複しないよう idempotencyKey を渡す
+        options?: { idempotencyKey?: string }
+      ): Promise<{ url?: string | null }>
     }
   }
   billingPortal: {
