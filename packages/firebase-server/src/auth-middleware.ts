@@ -59,12 +59,20 @@ export function createRequireAuth(
       return
     }
 
+    // next() を try の中で呼ぶと、後続ハンドラの同期例外まで catch に入り
+    // 401 に化ける。NextLike は Express 以外も想定した型なので、
+    // 検証の await だけを try で囲む
+    let uid: string
+
     try {
       const decoded = await resolveAuth().verifyIdToken(token, checkRevoked)
-      ;(req as RequestLike & { uid: string }).uid = decoded.uid
-      next()
+      uid = decoded.uid
     } catch {
       res.status(401).json({ error: 'Unauthorized' })
+      return
     }
+
+    ;(req as RequestLike & { uid: string }).uid = uid
+    next()
   }
 }

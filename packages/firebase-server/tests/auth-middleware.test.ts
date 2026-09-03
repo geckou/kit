@@ -86,6 +86,27 @@ describe('createRequireAuth', () => {
     expect(res.statusCode).toBe(0)
   })
 
+  // 回帰: next() を try の中で呼んでいたため、後続ハンドラの同期例外が
+  // catch に入り 401 に化けていた
+  it('next() が投げた例外を 401 に化けさせない', async () => {
+    verifyIdToken.mockResolvedValue({ uid: 'user-1' })
+
+    const res = createResponse()
+    const next = vi.fn(() => {
+      throw new Error('downstream failed')
+    })
+
+    await expect(
+      requireAuth(
+        createRequest('Bearer valid-token'),
+        res as unknown as ResponseLike,
+        next
+      )
+    ).rejects.toThrow('downstream failed')
+
+    expect(res.statusCode).toBe(0)
+  })
+
   it('ゲッターで渡すと解決がリクエスト時まで遅延される', async () => {
     const getVerifier = vi.fn(() => ({ verifyIdToken }))
     const middleware = createRequireAuth(getVerifier)
