@@ -117,29 +117,32 @@ async function handleTransfer(
     // 移動先の権利を取り直す。取得に失敗しても移動元の失効は確定させたいので、
     // ここでの失敗は Webhook を 500 にしない（RevenueCat に再送させても
     // 移動元は duplicate になるだけで、移動先の取得が成功する保証もない）
-    for (const uid of to) {
-      if (!fetchSubscriber) break
+    if (fetchSubscriber) {
+      for (const uid of to) {
+        try {
+          const subscription = await fetchSubscriber(uid)
 
-      try {
-        const subscription = await fetchSubscriber(uid)
+          if (!subscription) {
+            console.warn(
+              `RevenueCat TRANSFER to ${uid}: 有効な権利がありません`
+            )
+            continue
+          }
 
-        if (!subscription) {
-          console.warn(`RevenueCat TRANSFER to ${uid}: 有効な権利がありません`)
-          continue
+          await applySubscriptionEvent(config, {
+            eventId: `${eventId}:to:${uid}`,
+            source: 'revenuecat',
+            uid,
+            occurredAt,
+            // source はフックに決めさせない（config.ts の注意書きを参照）
+            subscription: { ...subscription, source: 'revenuecat' },
+          })
+        } catch (error) {
+          console.error(
+            `Failed to restore the transferred entitlement for ${uid}`,
+            error
+          )
         }
-
-        await applySubscriptionEvent(config, {
-          eventId: `${eventId}:to:${uid}`,
-          source: 'revenuecat',
-          uid,
-          occurredAt,
-          subscription,
-        })
-      } catch (error) {
-        console.error(
-          `Failed to restore the transferred entitlement for ${uid}`,
-          error
-        )
       }
     }
   } catch (error) {

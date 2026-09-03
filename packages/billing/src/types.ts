@@ -64,7 +64,13 @@ export type SubscriptionEvent = {
   >
 }
 
-export type ApplyStatus = 'applied' | 'duplicate' | 'stale'
+/**
+ * - applied   反映した
+ * - duplicate 同じ eventId を既に処理済み
+ * - stale     反映済みより古いイベント
+ * - ignored   意図的に無視した（別経路の、今より強くない権利）
+ */
+export type ApplyStatus = 'applied' | 'duplicate' | 'stale' | 'ignored'
 
 export type ApplyResult = {
   status: ApplyStatus

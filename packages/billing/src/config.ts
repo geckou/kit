@@ -125,11 +125,14 @@ export type BillingConfig = {
      *
      * REST API（`GET /subscribers/{app_user_id}`）等でその時点の権利を取り、
      * 反映する内容を返す。権利が無ければ null を返す。
-     * 未指定なら移動先は警告のみ（従来どおり）
+     * 未指定なら移動先は警告のみ（従来どおり）。
+     *
+     * `source` は受け取らない。誤って 'stripe' を返されると、以後 RevenueCat の
+     * 失効が「別経路」と判定されて永久に無視され、権利が固着する
      */
     fetchSubscriber?: (
       appUserId: string
-    ) => Promise<SubscriptionEvent['subscription'] | null>
+    ) => Promise<Omit<SubscriptionEvent['subscription'], 'source'> | null>
   }
 
   /**

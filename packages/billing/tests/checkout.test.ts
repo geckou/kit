@@ -118,7 +118,7 @@ describe('createCheckoutSession', () => {
       }),
       expect.objectContaining({
         idempotencyKey: expect.stringMatching(
-          /^checkout_user-1_price_allowed_\d+$/
+          /^checkout:user-1:\d+:[0-9a-f]{16}$/
         ),
       })
     )
@@ -135,8 +135,10 @@ describe('createCheckoutSession', () => {
 
     expect(mockCustomersCreate).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: { uid: 'user-1' } }),
-      // 二重送信で顧客が重複しないよう uid をキーにする
-      { idempotencyKey: 'customer_user-1' }
+      // 二重送信で顧客が重複しないよう uid とパラメータの指紋をキーにする
+      {
+        idempotencyKey: expect.stringMatching(/^customer_user-1_[0-9a-f]{16}$/),
+      }
     )
     expect(mockSaveStripeCustomerId).toHaveBeenCalledWith(
       expect.anything(),
@@ -167,7 +169,9 @@ describe('createCheckoutSession', () => {
     expect(result.status).toBe(200)
     expect(mockCustomersCreate).toHaveBeenCalledWith(
       expect.objectContaining({ email: undefined }),
-      { idempotencyKey: 'customer_user-1' }
+      {
+        idempotencyKey: expect.stringMatching(/^customer_user-1_[0-9a-f]{16}$/),
+      }
     )
   })
 
@@ -222,7 +226,9 @@ describe('createCheckoutSession', () => {
 
     expect(mockCustomersCreate).toHaveBeenCalledTimes(2)
     for (const call of mockCustomersCreate.mock.calls) {
-      expect(call[1]).toEqual({ idempotencyKey: 'customer_user-1' })
+      expect(call[1]).toEqual({
+        idempotencyKey: expect.stringMatching(/^customer_user-1_[0-9a-f]{16}$/),
+      })
     }
   })
 
@@ -251,32 +257,37 @@ describe('createCheckoutSession', () => {
     expect(keys[0]).toBe(keys[1])
   })
 
-  // 回帰: 1 回目に email 取得と保存が失敗すると、再試行が別パラメータ + 同じキーに
-  // なり、Stripe が 24 時間 idempotency_error を返して自力で抜けられなかった
-  it('idempotency_error はキーなしで作り直す', async () => {
+  // 回帰: キーを uid だけで作ると、1 回目に email 取得と保存が失敗した後の
+  // 再試行が「同じキー + 別パラメータ」になり、Stripe が 24 時間
+  // idempotency_error を返して自力で抜けられなかった。
+  // パラメータを指紋にして畳み込むので、キーが変わって衝突しない
+  it('パラメータが変わればキーも変わる（idempotency 衝突を作らない）', async () => {
     mockGetStripeCustomerId.mockResolvedValue(undefined)
-    mockCustomersCreate
-      .mockRejectedValueOnce({ type: 'StripeIdempotencyError' })
-      .mockResolvedValueOnce({ id: 'cus_new' })
+    mockCustomersCreate.mockResolvedValue({ id: 'cus_new' })
 
-    const result = await createCheckoutSession(createConfig(), {
+    fakeAuth.getUser.mockRejectedValueOnce(new Error('auth down'))
+    await createCheckoutSession(createConfig(), {
       uid: 'user-1',
       priceId: 'price_allowed',
     })
 
-    expect(result.status).toBe(200)
-    expect(mockCustomersCreate).toHaveBeenCalledTimes(2)
-    expect(mockCustomersCreate.mock.calls[1][1]).toBeUndefined()
-    expect(mockSaveStripeCustomerId).toHaveBeenCalledWith(
-      expect.anything(),
-      'user-1',
-      'cus_new'
+    fakeAuth.getUser.mockResolvedValue({ email: 'user@example.com' })
+    await createCheckoutSession(createConfig(), {
+      uid: 'user-1',
+      priceId: 'price_allowed',
+    })
+
+    const keys = mockCustomersCreate.mock.calls.map(
+      (call) => (call[1] as { idempotencyKey: string }).idempotencyKey
     )
+
+    expect(keys[0]).not.toBe(keys[1])
   })
 
-  it('idempotency_error 以外のエラーはそのまま 500 になる', async () => {
+  // キーなしで作り直すフォールバックは置かない（重複顧客が復活するため）
+  it('顧客作成のエラーはそのまま 500 になる', async () => {
     mockGetStripeCustomerId.mockResolvedValue(undefined)
-    mockCustomersCreate.mockRejectedValue(new Error('Stripe down'))
+    mockCustomersCreate.mockRejectedValue({ type: 'StripeIdempotencyError' })
 
     const result = await createCheckoutSession(createConfig(), {
       uid: 'user-1',

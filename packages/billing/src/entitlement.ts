@@ -2,6 +2,8 @@ import type { Subscription } from './types.js'
 
 // クライアント（ブラウザ）からは、このモジュールだけを import すれば
 // 権利判定と関連型が揃うようにする（ルートは Node 専用の crypto を含むため）
+import type { DateLike } from './types.js'
+
 export type {
   DateLike,
   Subscription,
@@ -9,7 +11,7 @@ export type {
   SubscriptionStatus,
 } from './types.js'
 
-export function toDate(value: unknown): Date | null {
+export function toDate(value: DateLike | null | undefined): Date | null {
   if (value instanceof Date) return value
 
   if (

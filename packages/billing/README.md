@@ -112,15 +112,32 @@ import type { Subscription } from '@geckou/billing/entitlement'
 購読は同じ場所を取り合う。Checkout の 409 は Stripe 側の重複しか防がず、
 アプリ内課金（IAP）はゲートできないので、両方で購入された状態は起こりうる。
 
-このとき**別経路からのダウングレード（有効 → 無効）は適用しない**。日時と
-`sequence` だけで前後を決めると、Stripe が有効なまま IAP を買ったユーザーに後日
-届く RevenueCat の `EXPIRATION` が Stripe の `active` を `expired` で上書きし、
-`onSubscriptionDowngraded` まで呼ばれてしまうため。無視したイベントは
-`applied: false` で記録し、警告をログに出す（`ApplyResult.status` は `stale`）。
+このとき**別経路の書き込みは「今より強いとき」だけ通す**。具体的には、現在の権利が
+有効で、かつイベントの経路が違う場合、次のどれかを満たさないと適用しない。
 
-**同じ経路のダウングレードと、経路をまたぐ有効 → 有効の切り替えは従来どおり適用する。**
-経路ごとに権利を保持して OR を取る形にはしていない（`Subscription` の形が変わるため）。
-両経路の購入を UI から防ぎたい場合は、IAP の購入画面側でも権利を確認すること。
+- 反映後も有効で、`currentPeriodEnd` が今より後ろへ伸びる
+- 反映後も有効で、今は期限を持つがイベント側は期限を持たない（無期限とみなす）
+
+日時と `sequence` だけで前後を決めると、次の 2 通りで生きている権利が消える。
+
+1. Stripe `active` → RevenueCat `EXPIRATION`（`occurredAt` が新しい）が直接上書きする
+2. Stripe `active` → RevenueCat `CANCELLATION`（まだ有効なのでスロットを奪う）
+   → RevenueCat `EXPIRATION`（同一経路なので通る）
+
+無視したイベントは `applied: false` で記録し、警告をログに出す
+（`ApplyResult.status` は `'ignored'`）。
+
+**同じ経路の遷移は従来どおり全て適用する。** 経路ごとに権利を保持して OR を取る形には
+していない（`Subscription` の形が変わるため）。両経路の購入を UI から防ぎたい場合は、
+IAP の購入画面側でも権利を確認すること。
+
+### 0.3.0 の破壊的変更
+
+- `Subscription` の日時（`currentPeriodEnd` / `lastEventAt` / `updatedAt`）が
+  `Date` から `DateLike` になった。読み出した値を `Date` として使っていた箇所は
+  `toDate()` を通す（→「日時の型」）
+- `ApplyStatus` に `'ignored'` が増えた。`status` を網羅的に分岐している箇所は追従する
+- 経路をまたぐイベントの扱いが変わった（→「同一ユーザーが両経路で購入した場合」）
 
 ### 日時の型（Date と Timestamp）
 
@@ -145,5 +162,7 @@ const periodEnd = toDate(subscription?.currentPeriodEnd) // Date | null
   これらを read-only にしている）
 - `process.env` を読まない（設定は全て `createBilling` の config で注入）
 - コレクション名は `collections` で差し替え可能（複数環境を 1 プロジェクトに相乗りさせる構成向け）
-- `firebase-admin` / `stripe` は peerDependencies（利用側と同一インスタンスを共有する）
+- `firebase-admin` は peerDependencies（Firestore / Auth のインスタンスを注入して使うため、
+  利用側と同一インスタンスを共有する必要がある）。`stripe` は optional peer で、
+  型は `StripeClientLike` として構造的に要求するだけなので、RevenueCat だけの構成では入れなくてよい
 - Webhook は `{ rawBody, headers }` → `{ status, body }` の純粋な入出力

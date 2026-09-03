@@ -14,6 +14,39 @@ function omitUndefined<T extends Record<string, unknown>>(value: T): T {
 }
 
 /**
+ * 別経路（Stripe ↔ RevenueCat）のイベントで、生きているスロットを奪ってよいか。
+ *
+ * users/{uid}.subscription は 1 スロットしかなく、両方の経路で購入されると
+ * そこを取り合う。日時と sequence だけで前後を決めると、次の 2 通りで
+ * 生きている権利が消える:
+ *
+ *   1. 別経路の失効が直接上書きする
+ *      Stripe active → RevenueCat EXPIRATION（occurredAt が新しい）
+ *   2. 別経路の「まだ有効」がスロットを奪い、その後で同一経路の失効が通る
+ *      Stripe active → RevenueCat CANCELLATION（有効）→ RevenueCat EXPIRATION
+ *
+ * どちらも「今の権利より弱いものに置き換わる」のが原因なので、
+ * 別経路の書き込みは **今より強いとき** だけ通す。
+ */
+function acceptsCrossSourceTakeover(
+  current: Subscription,
+  next: Subscription
+): boolean {
+  // 無効になるなら、生きている権利のほうが正
+  if (!isSubscriptionActive(next)) return false
+
+  const currentEnd = toDate(current.currentPeriodEnd)
+  const nextEnd = toDate(next.currentPeriodEnd)
+
+  // 期限を持たない active は「いつまで有効か分からない」。強弱を決められないので、
+  // 現状維持に倒す（next だけが期限を持たない場合は next のほうが強いと見なす）
+  if (nextEnd === null) return currentEnd !== null
+  if (currentEnd === null) return false
+
+  return nextEnd.getTime() > currentEnd.getTime()
+}
+
+/**
  * サブスクリプションイベントを users/{uid}.subscription に反映する。
  *
  * Webhook は再送されるため、以下をトランザクションで保証する:
@@ -44,10 +77,10 @@ export async function applySubscriptionEvent(
   })
 
   // トランザクションは再試行されうるので、警告は確定後に 1 回だけ出す
-  let crossSourceDowngrade = false
+  let crossSourceBlocked = false
 
   const result = await db.runTransaction<ApplyResult>(async (transaction) => {
-    crossSourceDowngrade = false
+    crossSourceBlocked = false
 
     // Firestore のトランザクションは全ての read を write より先に行う必要がある
     const [eventSnapshot, userSnapshot] = await Promise.all([
@@ -74,19 +107,15 @@ export async function applySubscriptionEvent(
         (lastEventAt.getTime() === event.occurredAt.getTime() &&
           sequence < lastSequence))
 
-    // users/{uid}.subscription は 1 スロットしかなく、経路が違う購読はそこを
-    // 取り合う。日時と sequence だけで前後を決めると、Stripe で有効なまま IAP を
-    // 買ったユーザーに後日届く RevenueCat の EXPIRATION（occurredAt は新しい）が
-    // Stripe の active を expired で上書きし、onSubscriptionDowngraded まで呼ばれる。
-    // 別経路からのダウングレードは適用しない（まだ生きている権利のほうが正）
+    // 別経路の書き込みは、今より強いときだけ通す（→ acceptsCrossSourceTakeover）。
     // source を持たない古いデータは経路が分からないので対象外にする
-    crossSourceDowngrade =
+    crossSourceBlocked =
       current?.source !== undefined &&
       current.source !== event.source &&
       wasActive &&
-      !isSubscriptionActive(next)
+      !acceptsCrossSourceTakeover(current, next)
 
-    const skip = isStale || crossSourceDowngrade
+    const skip = isStale || crossSourceBlocked
 
     // 適用しない場合でもイベント自体は記録して、再送のたびに読み直さないようにする
     transaction.set(eventRef, {
@@ -99,7 +128,11 @@ export async function applySubscriptionEvent(
     })
 
     if (skip) {
-      return { status: 'stale', wasActive, isActive: wasActive }
+      return {
+        status: crossSourceBlocked ? 'ignored' : 'stale',
+        wasActive,
+        isActive: wasActive,
+      }
     }
 
     // update ではなく set + mergeFields を使う（ドキュメント未作成時に throw するため）。
@@ -119,9 +152,9 @@ export async function applySubscriptionEvent(
     }
   })
 
-  if (crossSourceDowngrade) {
+  if (crossSourceBlocked) {
     console.warn(
-      'Ignored a cross-source subscription downgrade; the active entitlement was kept',
+      'Ignored a cross-source subscription event that is not stronger than the current one; the active entitlement was kept',
       { uid: event.uid, eventSource: event.source, eventId: event.eventId }
     )
   }
