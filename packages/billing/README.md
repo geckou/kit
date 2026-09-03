@@ -68,7 +68,8 @@ revenuecat: {
   fetchSubscriber: async (appUserId) => {
     const entitlement = await fetchEntitlementFromRevenueCat(appUserId)
     if (!entitlement) return null
-    return { status: 'active', source: 'revenuecat', planId: entitlement.id }
+    // source は返さない（型が Omit<..., 'source'>。実装側で 'revenuecat' を入れる）
+    return { status: 'active', planId: entitlement.id }
   },
 }
 ```
@@ -89,8 +90,17 @@ revenuecat: {
 
 409 の判定と Checkout の作成の間にロックは無い（Firestore の読みと Stripe の
 作成をまたぐため）。二重送信で判定を同時に通り抜けても Checkout が 2 本に
-ならないよう、作成には `checkout_<uid>_<priceId>_<10 分の時間窓>` を
+ならないよう、作成には `checkout:<uid>:<10 分の時間窓>:<パラメータの指紋>` を
 idempotencyKey として渡している。キャンセル後の作り直しは次の時間窓で通る。
+
+指紋（作成パラメータの SHA-256 の先頭 16 桁）を混ぜているのは、**同じキーに
+異なるパラメータを送ると Stripe が `idempotency_error`（400）を返し、そのキーが
+24 時間残る**ため。顧客 ID が変わった直後などにこれを踏むと、利用者には 500 が
+返り続ける。顧客の作成キー（`customer_<uid>_<パラメータの指紋>`）も同じ理由で
+指紋を含む。
+
+⚠️ **時間窓の境界をまたいだ二重送信は取りこぼす。** Firestore のロックではなく
+確率的な防御なので、確実性が要るなら利用側でボタンを無効化すること。
 
 権利判定だけなら factory 不要:
 
