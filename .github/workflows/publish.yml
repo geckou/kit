@@ -119,7 +119,10 @@ jobs:
           # Trusted Publishing は Node >= 22.14.0 を要求する。範囲で書くのは、
           # `22` だとランナーのツールキャッシュ次第で 22.14 未満が選ばれうるため
           node-version: '>=22.14.0'
-          cache: yarn
+          # cache: yarn は使わない。registry-url を指定すると setup-node が
+          # .npmrc に ${NODE_AUTH_TOKEN} を書き、その直後に走る `yarn cache dir` が
+          # 「Failed to replace env in config」で落ちる（Trusted Publishing なので
+          # トークンは存在しない）。1 回だけの publish ジョブなので効果も薄い
           registry-url: https://registry.npmjs.org/
 
       # Node 22 に同梱の npm は 10 系。Trusted Publishing は npm >= 11.5.1 が要る
