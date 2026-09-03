@@ -160,10 +160,11 @@ describe('RevenueCat Webhook', () => {
     )
   })
 
+  // TRANSFER は処理対象なので、ここでは mapRevenueCatStatus が null を返す種別を使う
   it('未知のイベントタイプでも 200 を返す（Firestore 更新なし）', async () => {
     const result = await handleRevenueCatWebhook(
       createConfig(),
-      createRequest(createEventBody('TRANSFER', 'user-1'), authed)
+      createRequest(createEventBody('SUBSCRIBER_ALIAS', 'user-1'), authed)
     )
 
     expect(result.status).toBe(200)
@@ -430,5 +431,85 @@ describe('RevenueCat Webhook', () => {
         })
       )
     }
+  })
+
+  // 回帰: TRANSFER のペイロードには期限も entitlement も乗らないため、移動先は
+  // 次の更新（年額なら最長 1 年後）まで未購読扱いになっていた
+  it('fetchSubscriber があれば移動先の権利を取り直して反映する', async () => {
+    const fetchSubscriber = vi.fn().mockResolvedValue({
+      status: 'active' as const,
+      source: 'revenuecat' as const,
+      planId: 'premium',
+    })
+
+    const result = await handleRevenueCatWebhook(
+      createConfig(AUTH_HEADER, { fetchSubscriber }),
+      createRequest(
+        createEventBody('TRANSFER', 'user-new', {
+          transferred_from: ['user-old'],
+          transferred_to: ['user-new'],
+        }),
+        authed
+      )
+    )
+
+    expect(result.status).toBe(200)
+    expect(fetchSubscriber).toHaveBeenCalledWith('user-new')
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        uid: 'user-new',
+        subscription: expect.objectContaining({
+          status: 'active',
+          planId: 'premium',
+        }),
+      })
+    )
+  })
+
+  it('fetchSubscriber が null を返したら移動先には何も書かない', async () => {
+    const fetchSubscriber = vi.fn().mockResolvedValue(null)
+
+    await handleRevenueCatWebhook(
+      createConfig(AUTH_HEADER, { fetchSubscriber }),
+      createRequest(
+        createEventBody('TRANSFER', 'user-new', {
+          transferred_from: ['user-old'],
+          transferred_to: ['user-new'],
+        }),
+        authed
+      )
+    )
+
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledTimes(1)
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ uid: 'user-old' })
+    )
+  })
+
+  // 移動元の失効は確定させたいので、移動先の取得失敗で 500 にしない
+  it('fetchSubscriber が失敗しても移動元の失効は残り 200 を返す', async () => {
+    const fetchSubscriber = vi.fn().mockRejectedValue(new Error('RC down'))
+
+    const result = await handleRevenueCatWebhook(
+      createConfig(AUTH_HEADER, { fetchSubscriber }),
+      createRequest(
+        createEventBody('TRANSFER', 'user-new', {
+          transferred_from: ['user-old'],
+          transferred_to: ['user-new'],
+        }),
+        authed
+      )
+    )
+
+    expect(result.status).toBe(200)
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        uid: 'user-old',
+        subscription: expect.objectContaining({ status: 'expired' }),
+      })
+    )
   })
 })

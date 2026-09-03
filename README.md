@@ -22,9 +22,16 @@ UI コンポーネントは [`geckou/ui`](https://github.com/geckou/ui)（`@geck
 - **実行環境非依存**: Cloud Functions / Next.js Route Handler のどちらからも使える形にする。
   Webhook 処理は raw body + headers を受け取って結果を返し、`firebase-admin` のインスタンスや
   コレクション名の解決関数は利用側から注入する
-- **`peerDependencies`**: `firebase` / `firebase-admin` / `react` / `next` 等は必ず peer にする。
-  `dependencies` に入れると利用側と別インスタンスの Firebase App が生成され、
-  認証状態が共有されない追いにくいバグになる
+- **`peerDependencies`**: **実行時に SDK を読むパッケージ**（`firebase` / `firebase-admin` /
+  `react` / `next` 等）は必ず peer にする。`dependencies` に入れると利用側と別インスタンスの
+  Firebase App が生成され、認証状態が共有されない追いにくいバグになる。
+  `@geckou/billing` は Firestore / Auth のインスタンスを注入して使うため
+  `firebase-admin` を必須 peer にしている
+- **型だけを必要とするなら peer にしない**: 使用するメソッドだけを構造的に要求する型
+  （`@geckou/firebase-server` の `TokenVerifierLike`、`@geckou/billing` の
+  `StripeClientLike`）を定義する。peer の型を公開 API に置くと、メジャー間の型定義の差が
+  そのまま利用側の型エラーになるため。`@geckou/firebase-server` が peer を持たないのは
+  この方針による
 - **配線はテンプレート側のスキルが担当**: パッケージは配れてもプロジェクトへの配線
   （依存追加・`firebase.json`・env・CI）は配れない。`/add-billing` 等のスキルが
   project-starter 側に置かれる

@@ -54,7 +54,31 @@ TestFlight や開発ビルドが本番の Webhook URL を叩いたときに、�
 本番の権利が付くのを防ぐため。開発環境の Functions では `allowSandbox: true` にする。
 
 `TRANSFER`（権利が別の `app_user_id` へ移った）は、`transferred_from` の各ユーザーを
-`expired` にする。移った先は後続の購入・更新イベントで `active` になる。
+`expired` にする。
+
+**移動先は TRANSFER のペイロードだけでは決まらない**（期限も entitlement も乗らない）。
+何もしないと次の購入・更新イベントまで「未購読」扱いのままで、年額なら最長 1 年かかる。
+Restore の既定（Transfer to new App User ID）で普通に起きる導線なので、
+`revenuecat.fetchSubscriber` を設定して現在の権利を取り直すこと。
+
+```ts
+revenuecat: {
+  webhookAuth: process.env.REVENUECAT_WEBHOOK_AUTH!,
+  // GET /subscribers/{app_user_id} などで今の権利を取り、反映する内容を返す
+  fetchSubscriber: async (appUserId) => {
+    const entitlement = await fetchEntitlementFromRevenueCat(appUserId)
+    if (!entitlement) return null
+    return { status: 'active', source: 'revenuecat', planId: entitlement.id }
+  },
+}
+```
+
+移動先の取得に失敗しても Webhook は 200 を返す（移動元の失効は確定させたいため）。
+未設定なら警告のみで、従来どおり後続イベント待ちになる。
+
+**`app_user_id` は Firebase の uid にすること。** Webhook が書き込む先は
+`users/{app_user_id}` で、`Purchases.logIn(uid)` していない匿名 ID のままだと
+`users/$RCAnonymousID:...` が作られ、そのユーザーの権利はどこからも参照されない。
 
 ### Checkout とプラン変更
 
@@ -114,6 +138,11 @@ const periodEnd = toDate(subscription?.currentPeriodEnd) // Date | null
 
 ## 設計方針
 
+- **`users/{uid}.subscription` / `stripeCustomerId` / `billing_events` はサーバー専用の
+  書き込みにすること。** Checkout の 409 判定・権利変化の検出・`isSubscriptionActive` は
+  全てこの値を信用する。クライアントから `subscription` を書けるセキュリティルールだと、
+  ユーザーが自分で権利を付与できる（project-starter の `firestore.rules` は
+  これらを read-only にしている）
 - `process.env` を読まない（設定は全て `createBilling` の config で注入）
 - コレクション名は `collections` で差し替え可能（複数環境を 1 プロジェクトに相乗りさせる構成向け）
 - `firebase-admin` / `stripe` は peerDependencies（利用側と同一インスタンスを共有する）

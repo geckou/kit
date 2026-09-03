@@ -1,7 +1,7 @@
 import type { Auth } from 'firebase-admin/auth'
 import type { Firestore } from 'firebase-admin/firestore'
 
-import type { Subscription } from './types.js'
+import type { Subscription, SubscriptionEvent } from './types.js'
 
 /**
  * Stripe クライアントに要求する形。
@@ -115,6 +115,21 @@ export type BillingConfig = {
      * 本番の権利が付いてしまう。develop 環境の Functions でのみ true にする
      */
     allowSandbox?: boolean
+
+    /**
+     * TRANSFER の移動先について、現在の権利を取り直すためのフック。
+     *
+     * TRANSFER のペイロードには期限も entitlement も乗らないため、移動先は
+     * 次の購入・更新イベントまで「未購読」扱いになる（年額なら最長 1 年）。
+     * RevenueCat の Restore 既定（Transfer to new App User ID）で普通に起きる。
+     *
+     * REST API（`GET /subscribers/{app_user_id}`）等でその時点の権利を取り、
+     * 反映する内容を返す。権利が無ければ null を返す。
+     * 未指定なら移動先は警告のみ（従来どおり）
+     */
+    fetchSubscriber?: (
+      appUserId: string
+    ) => Promise<SubscriptionEvent['subscription'] | null>
   }
 
   /**
