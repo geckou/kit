@@ -38,16 +38,31 @@ UI コンポーネントは [`geckou/ui`](https://github.com/geckou/ui)（`@geck
 
 ## リリース
 
-[`geckou/ui`](https://github.com/geckou/ui) と同じタグ駆動方式。
+**version を上げる PR を `production` へマージすれば、それだけで npm へ公開される。**
+`publish.yml` が `production` への push で走り、`packages/*/package.json` の version が
+npm に載っていないパッケージを全部公開する。手で叩くコマンドは無い。
+
+### タグを打って公開する（通常は不要）
+
+上の自動公開とは別に、タグ（`<ディレクトリ名>@<バージョン>`）を push しての公開も
+引き続きできる。使うのは次の 2 つの場合だけで、**通常のリリースでこの手順は要らない**。
+
+- リリースの区切りを git のタグとして残したいとき
+- 自動公開が失敗した／検査に引っかかったので、打ち直したいとき
 
 ```bash
-# 1. packages/<パッケージ>/package.json の version を上げる PR を出してマージする
-# 2. production でタグを打つ（複数まとめて指定できる）
+# version を上げる PR をマージしたあと（複数まとめて指定できる）
 git checkout production && git pull --ff-only
 yarn release billing firebase-client firebase-server
 ```
 
-`<ディレクトリ名>@<バージョン>` 形式のタグを push すると `publish.yml` が npm へ公開する。
+**どちらの経路でも公開されるのは「npm に未公開の version」だけ。** 公開済みのものは
+対象から外れて publish ジョブごと skip されるので、自動公開の後からタグを打っても
+二重に公開されることはない。
+
+自動公開は、公開済みの型定義との差分検査（`check-api-diff.mjs`）に引っかかると止まる。
+**互換の追加だと分かっていて通したい場合は `yarn release <パッケージ> --force` でタグを打つ。**
+タグ起動の実行はこの検査を行わない（`release.sh` が打つ前に済ませているため）。
 
 コミットメッセージは commitlint が検証し、**規約違反はコミットをブロックする**
 （`.husky/commit-msg`）。派生プロジェクト向けのテンプレート（geckou/project-starter）は
@@ -117,10 +132,10 @@ npm 側では縛れない。そこは上の `production` 包含チェックと�
 
 | ref type | パターン | 用途 |
 | --- | --- | --- |
-| Tag | `*@*` | 通常のリリース（`yarn release`） |
-| Branch | `production` | `workflow_dispatch` での公開（初回リリース等） |
+| Tag | `*@*` | タグを打っての公開（`yarn release`） |
+| Branch | `production` | `production` への push による自動公開と `workflow_dispatch` |
 
-**タグだけに限定すると `workflow_dispatch` が Environment 側で弾かれる。**
+**どちらか片方に限定すると、もう一方が Environment 側で弾かれる。**
 
 公開されたパッケージには provenance（どのコミット・どのワークフローから公開されたかの証明）
 が付く。
