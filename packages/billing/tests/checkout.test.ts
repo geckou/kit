@@ -89,6 +89,39 @@ describe('createCheckoutSession', () => {
     expect(result.status).toBe(400)
   })
 
+  it('空文字の priceId を 400 で拒否する', async () => {
+    const result = await createCheckoutSession(createConfig(), {
+      uid: 'user-1',
+      priceId: '',
+    })
+
+    expect(result.status).toBe(400)
+    expect(mockCheckoutCreate).not.toHaveBeenCalled()
+  })
+
+  it('空白のみの priceId を 400 で拒否する', async () => {
+    const result = await createCheckoutSession(createConfig(), {
+      uid: 'user-1',
+      priceId: '  ',
+    })
+
+    expect(result.status).toBe(400)
+    expect(mockCheckoutCreate).not.toHaveBeenCalled()
+  })
+
+  // 許可リストが `(process.env.X ?? '').split(',')` で作られていると未設定時に
+  // [''] になる。「何も許可しない」つもりの設定で空文字だけが通ってしまうため、
+  // 許可リストに空文字が入っていても弾くこと
+  it('許可リストに空文字が入っていても空文字の priceId を 400 で拒否する', async () => {
+    const result = await createCheckoutSession(
+      createConfig({ allowedPriceIds: [''] }),
+      { uid: 'user-1', priceId: '' }
+    )
+
+    expect(result.status).toBe(400)
+    expect(mockCheckoutCreate).not.toHaveBeenCalled()
+  })
+
   it('許可された priceId で Checkout セッションを作り URL を返す', async () => {
     const result = await createCheckoutSession(createConfig(), {
       uid: 'user-1',

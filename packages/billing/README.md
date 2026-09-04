@@ -15,7 +15,10 @@ const billing = createBilling({
   stripe: {
     client: new Stripe(process.env.STRIPE_SECRET_KEY!),
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!,
-    allowedPriceIds: (process.env.STRIPE_PRICE_IDS ?? '').split(','),
+    // 未設定のときに [''] にならないよう filter(Boolean) を通す
+    allowedPriceIds: (process.env.STRIPE_PRICE_IDS ?? '')
+      .split(',')
+      .filter(Boolean),
     successUrl: process.env.STRIPE_SUCCESS_URL,
     cancelUrl: process.env.STRIPE_CANCEL_URL,
     portalReturnUrl: process.env.STRIPE_PORTAL_RETURN_URL,
