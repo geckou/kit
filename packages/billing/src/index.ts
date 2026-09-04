@@ -24,7 +24,7 @@ import type {
 } from './types.js'
 
 // 純粋関数・型は factory を介さず直接使える
-export { hasPlan, isSubscriptionActive } from './entitlement.js'
+export { hasPlan, isSubscriptionActive, toDate } from './entitlement.js'
 export { mapRevenueCatStatus, mapStripeStatus } from './status-mapping.js'
 export type { BillingConfig, StripeClientLike } from './config.js'
 export type {

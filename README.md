@@ -61,8 +61,12 @@ yarn release billing firebase-client firebase-server
 二重に公開されることはない。
 
 自動公開は、公開済みの型定義との差分検査（`check-api-diff.mjs`）に引っかかると止まる。
-**互換の追加だと分かっていて通したい場合は `yarn release <パッケージ> --force` でタグを打つ。**
+**互換の追加だと分かっていて通したい場合は `yarn release <パッケージ> --force` でタグを打つ**
+（Actions からの手動実行なら `force` 入力でも同じことができる）。
 タグ起動の実行はこの検査を行わない（`release.sh` が打つ前に済ませているため）。
+
+比較対象は「これから出す version と**同じ `major.minor` の、公開済みで最大の patch**」。
+同じ系列に公開済みの版が無ければ（＝ 新しい major / minor なら）検査しない。
 
 コミットメッセージは commitlint が検証し、**規約違反はコミットをブロックする**
 （`.husky/commit-msg`）。派生プロジェクト向けのテンプレート（geckou/project-starter）は

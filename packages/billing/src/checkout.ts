@@ -105,11 +105,17 @@ export async function createCheckoutSession(
     return { status: 500, body: { error: 'Checkout URLs not configured' } }
   }
 
-  // 任意の price を購入されないよう、サーバー側の許可リストで検証する
+  // 任意の price を購入されないよう、サーバー側の許可リストで検証する。
+  // 空文字・空白のみは許可リストの作り方（`(process.env.X ?? '').split(',')` が
+  // 未設定時に `['']` になる等）で紛れ込みうるため、リストを見る前に弾く
   const allowedPriceIds = stripe.allowedPriceIds ?? []
   const priceId = input.priceId
 
-  if (typeof priceId !== 'string' || !allowedPriceIds.includes(priceId)) {
+  if (typeof priceId !== 'string' || priceId.trim() === '') {
+    return { status: 400, body: { error: 'Invalid priceId' } }
+  }
+
+  if (!allowedPriceIds.includes(priceId)) {
     return { status: 400, body: { error: 'Invalid priceId' } }
   }
 
