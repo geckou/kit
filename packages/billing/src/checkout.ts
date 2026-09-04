@@ -108,24 +108,27 @@ export async function createCheckoutSession(
   // 任意の price を購入されないよう、サーバー側の許可リストで検証する。
   // 空文字・空白のみは許可リストの作り方（`(process.env.X ?? '').split(',')` が
   // 未設定時に `['']` になる等）で紛れ込みうるため、リストを見る前に弾く
+  // 値は環境変数由来で JS からも渡りうる。string 以外が混ざっていても
+  // ここで例外にしない（この行は try の外なので呼び出し元まで伝播する）
   const allowedPriceIds = (stripe.allowedPriceIds ?? []).filter(
-    (id) => id.trim() !== ''
+    (id) => typeof id === 'string' && id.trim() !== ''
   )
   const priceId = input.priceId
-
-  // 許可リストが無い＝全拒否。設定漏れだと 'Invalid priceId' としか出ず
-  // 原因を追えないため、配線側の問題であることをログに残す
-  if (allowedPriceIds.length === 0) {
-    console.error(
-      'allowedPriceIds is empty; every checkout request will be rejected'
-    )
-  }
 
   if (typeof priceId !== 'string' || priceId.trim() === '') {
     return { status: 400, body: { error: 'Invalid priceId' } }
   }
 
   if (!allowedPriceIds.includes(priceId)) {
+    // 許可リストが無い＝全拒否。設定漏れだと 'Invalid priceId' としか出ず
+    // 原因を追えないため、配線側の問題であることをログに残す。
+    // 不正な入力のたびに出さないよう、priceId の形が正しいときだけ
+    if (allowedPriceIds.length === 0) {
+      console.error(
+        'allowedPriceIds is empty; every checkout request will be rejected'
+      )
+    }
+
     return { status: 400, body: { error: 'Invalid priceId' } }
   }
 

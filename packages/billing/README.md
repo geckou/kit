@@ -37,23 +37,33 @@ const billing = createBilling({
 // Express（Cloud Functions）
 // Functions Framework が自前のハンドラより前に JSON をパースするため、
 // 後段の express.raw() はスキップされ req.body はオブジェクトになる。
-// 署名検証に使える生のボディは req.rawBody にしか無い
-app.post('/webhooks/stripe', async (req, res) => {
+// 署名検証に使える生のボディは req.rawBody にしか無い。
+// express.raw() は Functions Framework を介さない素の Express 用の保険として
+// 残し、express.json() より前に置く
+const rawBodyOf = (req: express.Request) =>
+  (req as express.Request & { rawBody?: Buffer | string }).rawBody ??
+  (req.body as Buffer)
+
+app.post('/webhooks/stripe', express.raw({ type: '*/*' }), async (req, res) => {
   const result = await billing.handleStripeWebhook({
-    rawBody: req.rawBody ?? req.body,
+    rawBody: rawBodyOf(req),
     headers: req.headers,
   })
   res.status(result.status).json(result.body)
 })
 
 // RevenueCat も同じ（生のボディを JSON.parse するため、req.rawBody が要る）
-app.post('/webhooks/revenuecat', async (req, res) => {
-  const result = await billing.handleRevenueCatWebhook({
-    rawBody: req.rawBody ?? req.body,
-    headers: req.headers,
-  })
-  res.status(result.status).json(result.body)
-})
+app.post(
+  '/webhooks/revenuecat',
+  express.raw({ type: '*/*' }),
+  async (req, res) => {
+    const result = await billing.handleRevenueCatWebhook({
+      rawBody: rawBodyOf(req),
+      headers: req.headers,
+    })
+    res.status(result.status).json(result.body)
+  }
+)
 
 // Next.js Route Handler でも同じ
 export async function POST(req: Request) {

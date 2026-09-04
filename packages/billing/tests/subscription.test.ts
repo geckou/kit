@@ -259,7 +259,7 @@ describe('applySubscriptionEvent', () => {
         subscription: {
           status: 'active' as const,
           source: 'stripe' as const,
-          currentPeriodEnd: new Date('2027-08-01T00:00:00Z'),
+          currentPeriodEnd: new Date('2099-01-01T00:00:00Z'),
         },
       })
     )
@@ -268,6 +268,82 @@ describe('applySubscriptionEvent', () => {
     expect(readSubscription('user-1')).toMatchObject({
       status: 'active',
       source: 'stripe',
+    })
+  })
+
+  // 回帰: stale 判定を同一経路に限定した際、別経路のガードが wasActive のときしか
+  // 効かず、失効済みユーザーに遅延した古い active が無条件で適用されていた。
+  // status === 'active' は日時を見ずに有効扱いなので、権利が恒久的に復活する
+  it('別経路の古いイベントは、期限が過去なら現在の権利が無効でも適用しない', async () => {
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_stripe_expired',
+        source: 'stripe' as const,
+        occurredAt: new Date('2026-08-10T00:00:00Z'),
+        subscription: {
+          status: 'expired' as const,
+          source: 'stripe' as const,
+          currentPeriodEnd: new Date('2026-08-10T00:00:00Z'),
+        },
+      })
+    )
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_late',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-01T00:00:00Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'revenuecat' as const,
+          currentPeriodEnd: new Date('2026-08-15T00:00:00Z'),
+        },
+      })
+    )
+
+    expect(result.status).toBe('ignored')
+    expect(result.isActive).toBe(false)
+    expect(readSubscription('user-1')).toMatchObject({
+      status: 'expired',
+      source: 'stripe',
+    })
+  })
+
+  // 逆に、権利が切れた後に別経路で新しく購入し直した形（透かしより新しい）は通す
+  it('別経路でも透かしより新しいイベントは、現在の権利が無効なら適用する', async () => {
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_stripe_expired',
+        source: 'stripe' as const,
+        occurredAt: new Date('2026-08-10T00:00:00Z'),
+        subscription: {
+          status: 'expired' as const,
+          source: 'stripe' as const,
+        },
+      })
+    )
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_purchase',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-20T00:00:00Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'revenuecat' as const,
+          currentPeriodEnd: new Date('2099-01-01T00:00:00Z'),
+        },
+      })
+    )
+
+    expect(result.status).toBe('applied')
+    expect(readSubscription('user-1')).toMatchObject({
+      status: 'active',
+      source: 'revenuecat',
     })
   })
 

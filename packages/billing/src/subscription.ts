@@ -109,20 +109,36 @@ export async function applySubscriptionEvent(
     // 同じ occurredAt のときは sequence で前後を決める。
     // Stripe の event.created は秒精度で配信順も保証されないため、日時の比較だけだと
     // 後から届いた created(incomplete) が updated(active) を上書きしてしまう
-    const isStale =
-      isSameSource &&
+    const isOlderThanWatermark =
       lastEventAt !== null &&
       (lastEventAt.getTime() > event.occurredAt.getTime() ||
         (lastEventAt.getTime() === event.occurredAt.getTime() &&
           sequence < lastSequence))
 
+    const isStale = isSameSource && isOlderThanWatermark
+
     // 別経路の書き込みは、今より強いときだけ通す（→ acceptsCrossSourceTakeover）。
+    // 透かしより古い別経路のイベントは、期限が今より先へ伸びるものに限って認める。
+    // 既に終わった期間の active を後から適用すると、status === 'active' は
+    // 日時を見ずに有効扱いされる（isSubscriptionActive）ため、失効済みの権利が
+    // 遅延した再送 1 通で恒久的に復活してしまう
+    const nextPeriodEnd = toDate(next.currentPeriodEnd)
+    const extendsIntoFuture =
+      nextPeriodEnd !== null && nextPeriodEnd.getTime() > Date.now()
+
+    const acceptsTakeover =
+      current !== undefined &&
+      acceptsCrossSourceTakeover(current, next) &&
+      (!isOlderThanWatermark || extendsIntoFuture)
+
     // source を持たない古いデータは経路が分からないので対象外にする
+    // （wasActive だけを条件にすると、現在の権利が無効なときに別経路の古い
+    //  イベントが順序も強さも見られずに通ってしまう）
     crossSourceBlocked =
       current?.source !== undefined &&
       current.source !== event.source &&
-      wasActive &&
-      !acceptsCrossSourceTakeover(current, next)
+      (wasActive || isOlderThanWatermark) &&
+      !acceptsTakeover
 
     const skip = isStale || crossSourceBlocked
 
