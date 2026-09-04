@@ -109,6 +109,27 @@ describe('createCheckoutSession', () => {
     expect(mockCheckoutCreate).not.toHaveBeenCalled()
   })
 
+  // allowedPriceIds は型上任意だが、省略＝全拒否。エラーは 'Invalid priceId'
+  // としか出ないため、配線側の問題であることをログに残しているか
+  it('allowedPriceIds を省略すると全て 400 で拒否し、空である旨をログに出す', async () => {
+    const config = createConfig()
+    delete (config.stripe as Record<string, unknown>).allowedPriceIds
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const result = await createCheckoutSession(config, {
+      uid: 'user-1',
+      priceId: 'price_allowed',
+    })
+
+    expect(result.status).toBe(400)
+    expect(mockCheckoutCreate).not.toHaveBeenCalled()
+    expect(errorSpy.mock.calls.flat().join(' ')).toContain(
+      'allowedPriceIds is empty'
+    )
+
+    errorSpy.mockRestore()
+  })
+
   // 許可リストが `(process.env.X ?? '').split(',')` で作られていると未設定時に
   // [''] になる。「何も許可しない」つもりの設定で空文字だけが通ってしまうため、
   // 許可リストに空文字が入っていても弾くこと

@@ -98,22 +98,50 @@ export async function applySubscriptionEvent(
     const lastEventAt = toDate(current?.lastEventAt)
     const lastSequence = current?.lastEventSequence ?? 0
 
+    // lastEventAt / lastEventSequence は「同じ経路の中での順序制御」用。
+    // Stripe と RevenueCat のイベントは因果関係が無く時計も別なので、経路をまたいで
+    // 比較すると、遅れて届いた別経路の強い権利が stale として落ちてしまう。
+    // 経路が違うときの採否は acceptsCrossSourceTakeover だけで決める
+    // （source を持たない古いデータは経路が分からないので、同一経路として扱う）
+    const isSameSource =
+      current?.source === undefined || current.source === event.source
+
     // 同じ occurredAt のときは sequence で前後を決める。
     // Stripe の event.created は秒精度で配信順も保証されないため、日時の比較だけだと
     // 後から届いた created(incomplete) が updated(active) を上書きしてしまう
-    const isStale =
+    const isOlderThanWatermark =
       lastEventAt !== null &&
       (lastEventAt.getTime() > event.occurredAt.getTime() ||
         (lastEventAt.getTime() === event.occurredAt.getTime() &&
           sequence < lastSequence))
 
+    const isStale = isSameSource && isOlderThanWatermark
+
     // 別経路の書き込みは、今より強いときだけ通す（→ acceptsCrossSourceTakeover）。
+    // 透かしより古い別経路のイベントは、期限が「既に過ぎている」ものだけ弾く。
+    // 終わった期間の active を後から適用すると、status === 'active' は日時を
+    // 見ずに有効扱いされる（isSubscriptionActive）ため、失効済みの権利が
+    // 遅延した再送 1 通で恒久的に復活してしまう。
+    // 期限を持たない active（買い切り・NON_RENEWING_PURCHASE 等）は
+    // acceptsCrossSourceTakeover が「有限期限より強い」と決めているので、
+    // ここで弾かない（弾くと正当な無期限の権利が ignored になる）
+    const nextPeriodEnd = toDate(next.currentPeriodEnd)
+    const isExpiredPeriod =
+      nextPeriodEnd !== null && nextPeriodEnd.getTime() <= Date.now()
+
+    const acceptsTakeover =
+      current !== undefined &&
+      acceptsCrossSourceTakeover(current, next) &&
+      (!isOlderThanWatermark || !isExpiredPeriod)
+
     // source を持たない古いデータは経路が分からないので対象外にする
+    // （wasActive だけを条件にすると、現在の権利が無効なときに別経路の古い
+    //  イベントが順序も強さも見られずに通ってしまう）
     crossSourceBlocked =
       current?.source !== undefined &&
       current.source !== event.source &&
-      wasActive &&
-      !acceptsCrossSourceTakeover(current, next)
+      (wasActive || isOlderThanWatermark) &&
+      !acceptsTakeover
 
     const skip = isStale || crossSourceBlocked
 

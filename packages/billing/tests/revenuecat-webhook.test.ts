@@ -68,6 +68,24 @@ describe('RevenueCat Webhook', () => {
     })
   })
 
+  it('rawBody がパース済みのオブジェクトなら 500 を返し、理由をログに出す', async () => {
+    const config = createConfig()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const result = await handleRevenueCatWebhook(config, {
+      rawBody: {
+        event: { type: 'INITIAL_PURCHASE' },
+      } as unknown as WebhookRequest['rawBody'],
+      headers: authed,
+    })
+
+    expect(result.status).toBe(500)
+    expect(mockApplySubscriptionEvent).not.toHaveBeenCalled()
+    expect(errorSpy.mock.calls.flat().join(' ')).toContain('req.rawBody')
+
+    errorSpy.mockRestore()
+  })
+
   it('webhookAuth 未設定で 500 を返す', async () => {
     const result = await handleRevenueCatWebhook(
       createConfig(null),
