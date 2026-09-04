@@ -160,7 +160,7 @@ IAP の購入画面側でも権利を確認すること。
 **値を使うときは export 済みの `toDate()` を通すこと**。
 
 ```ts
-import { toDate, type Subscription } from '@geckou/billing/entitlement'
+import { toDate, type Subscription } from '@geckou/billing'
 
 const subscription = snapshot.get('subscription') as Subscription | undefined
 const periodEnd = toDate(subscription?.currentPeriodEnd) // Date | null
