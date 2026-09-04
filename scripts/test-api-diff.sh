@@ -320,13 +320,21 @@ else
   fail "一時ディレクトリが残った" "$leftovers"
 fi
 
-# 見出しと差分の出力先が割れていると、2>/dev/null したときに差分だけが文脈なしで残る
-output=$(cd "$work" && node "$SCRIPT" demo --published-tarball "$published" 2>/dev/null)
+# 見出しと差分の出力先が割れていると、2>/dev/null したときに差分だけが文脈なしで残る。
+# stdout に無いことだけを見ると、何も出力されなくなる退行を見逃すので stderr 側も見る
+out_only=$(cd "$work" && node "$SCRIPT" demo --published-tarball "$published" 2> /dev/null)
+err_only=$(cd "$work" && node "$SCRIPT" demo --published-tarball "$published" 2>&1 > /dev/null)
 
-if ! printf '%s' "$output" | grep -q 'dist/index.d.ts'; then
-  pass "差分は stderr に出す（見出しと同じ側）"
+if printf '%s' "$err_only" | grep -q 'dist/index.d.ts'; then
+  pass "差分を stderr に出す（見出しと同じ側）"
 else
-  fail "差分だけが stdout に出ている" "$output"
+  fail "stderr に差分が出ていない" "$err_only"
+fi
+
+if ! printf '%s' "$out_only" | grep -q 'dist/index.d.ts'; then
+  pass "差分は stdout には出さない"
+else
+  fail "差分が stdout に出ている" "$out_only"
 fi
 
 rm -rf "$work" "$tmp"
