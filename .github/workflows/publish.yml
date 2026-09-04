@@ -111,6 +111,15 @@ jobs:
             # grep ではなく [[ =~ ]] を使うのは、grep が行単位で照合するため
             # 改行を含む値だと 1 行目の一致で通過してしまうから
             if [[ ! "$PACKAGE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              # production への push では候補を packages/ から自動で集めているので、
+              # 名前が規約外のディレクトリは黙って飛ばす。ここでジョブごと落とすと、
+              # そういうディレクトリが 1 つ混ざるだけで他の全パッケージの公開が止まる。
+              # 名指しで指定されたときだけエラーにする
+              if [ "$GITHUB_REF_TYPE" != "tag" ] && [ -z "$INPUT_PACKAGE" ]; then
+                echo "::warning::packages/ に規約外の名前のディレクトリがあります（ケバブケースのみ）。公開対象から外します"
+                continue
+              fi
+
               # 検査に落ちた値はそのまま出さない。改行を含む値だと 2 行目が
               # ワークフローコマンド（::warning:: 等）として解釈されるため。
               # 値そのものはタグ名・実行時の入力として run の画面に出ている
@@ -141,8 +150,10 @@ jobs:
             VERSION="$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).version')"
 
             # タグ起動のときは、タグのバージョン部分と package.json の version の一致を見る。
-            # ずれていると、タグが指すものと実際に公開されるものが食い違う
-            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # ずれていると、タグが指すものと実際に公開されるものが食い違う。
+            # タグの ref から workflow_dispatch した場合は、入力のパッケージとタグ名が
+            # 無関係でありうるので見ない
+            if [ "$GITHUB_REF_TYPE" = "tag" ] && [ -z "$INPUT_PACKAGE" ]; then
               TAG_VERSION="${GITHUB_REF_NAME##*@}"
 
               if [ "$TAG_VERSION" != "$VERSION" ]; then
@@ -177,11 +188,21 @@ jobs:
 
   publish:
     needs: targets
-    # 公開対象が無ければ動かさない（matrix が空でもジョブは skip されるが、
-    # 意図が読めるように条件も書いておく）
+    # **この条件は必須。** matrix の値が空配列だと GitHub は
+    # 「Matrix vector 'package' does not contain any values」でワークフロー自体を
+    # 失敗させる。ジョブレベルの if は strategy の展開より先に評価されるので、
+    # 公開対象が無い実行（version を上げていない production への push、
+    # 公開済みバージョンへのタグ打ち直し）をここで skip させている
     if: needs.targets.outputs.packages != '[]'
     runs-on: ubuntu-latest
     environment: npm-publish
+    # 同じパッケージの公開が同時に走らないようにする。targets が「未公開」と判定してから
+    # npm publish に届くまで install / build / 検査が挟まるので、その間に別の経路
+    # （自動公開の直後に yarn release でタグを打つ等）が起動すると、両方が公開へ進んで
+    # 片方が 409 で落ちる。cancel-in-progress は付けない（走っている公開は止めない）
+    concurrency:
+      group: publish-${{ github.repository }}-${{ matrix.package }}
+      cancel-in-progress: false
     permissions:
       contents: read
       # Trusted Publishing（OIDC）で npm へ認証するために必要
@@ -219,15 +240,33 @@ jobs:
         run: yarn build
 
       # 公開済みの型定義と比べて、破壊的変更が patch に載っていないかを見る
-      # （geckou/project-starter#155）。release.sh がタグを打つ前に行う検査と同じもので、
-      # 自動公開ではここが唯一の実行機会になる。判定できない場合は素通しする安全網
+      # （geckou/project-starter#155）。判定できない場合は素通しする安全網。
+      #
+      # **自動公開のときだけ実行する。** タグ起動なら release.sh が打つ前に同じ検査を
+      # 済ませており、そこには「互換の追加だと分かっている」場合の --force がある。
+      # ここで無条件に見ると --force が効かなくなり、検査に引っかかった版を
+      # どの経路からも公開できなくなる（自動公開が止まったときの逃げ道が、
+      # yarn release <パッケージ> --force でタグを打つこと）
       - name: Check for breaking changes in a patch release
+        if: github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
         env:
           PACKAGE: ${{ matrix.package }}
         run: node scripts/check-api-diff.mjs "$PACKAGE"
 
       - name: Publish to npm
         working-directory: packages/${{ matrix.package }}
-        # --provenance: どのコミット・どのワークフローから公開されたかの証明を
-        # npm に添付する（OIDC で公開するときだけ付けられる）
-        run: npm publish --access public --provenance
+        run: |
+          NAME="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+
+          # targets が「未公開」と判定してからここまでに時間が空くので、直前にもう一度見る
+          # （concurrency で塞いでいるが、レジストリ側の反映待ちなども含めた最後の砦）。
+          # 未公開なら npm view はエラー（パッケージ未登録）か空（バージョン未登録）になる
+          if [ -n "$(npm view "$NAME@$VERSION" version 2> /dev/null || true)" ]; then
+            echo "$NAME@$VERSION は既に公開済みのため、publish をスキップします"
+            exit 0
+          fi
+
+          # --provenance: どのコミット・どのワークフローから公開されたかの証明を
+          # npm に添付する（OIDC で公開するときだけ付けられる）
+          npm publish --access public --provenance

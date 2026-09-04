@@ -55,6 +55,10 @@ yarn release billing firebase-client firebase-server
 対象から外れて publish ジョブごと skip されるので、自動公開の後からタグを打っても
 二重に公開されることはない。
 
+自動公開は、公開済みの型定義との差分検査（`check-api-diff.mjs`）に引っかかると止まる。
+**互換の追加だと分かっていて通したい場合は `yarn release <パッケージ> --force` でタグを打つ。**
+タグ起動の実行はこの検査を行わない（`release.sh` が打つ前に済ませているため）。
+
 コミットメッセージは commitlint が検証し、**規約違反はコミットをブロックする**
 （`.husky/commit-msg`）。派生プロジェクト向けのテンプレート（geckou/project-starter）は
 警告のみだが、このリポジトリはリリース単位が `git log` の可読性に直結するため止める。
