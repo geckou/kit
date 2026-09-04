@@ -118,18 +118,21 @@ export async function applySubscriptionEvent(
     const isStale = isSameSource && isOlderThanWatermark
 
     // 別経路の書き込みは、今より強いときだけ通す（→ acceptsCrossSourceTakeover）。
-    // 透かしより古い別経路のイベントは、期限が今より先へ伸びるものに限って認める。
-    // 既に終わった期間の active を後から適用すると、status === 'active' は
-    // 日時を見ずに有効扱いされる（isSubscriptionActive）ため、失効済みの権利が
-    // 遅延した再送 1 通で恒久的に復活してしまう
+    // 透かしより古い別経路のイベントは、期限が「既に過ぎている」ものだけ弾く。
+    // 終わった期間の active を後から適用すると、status === 'active' は日時を
+    // 見ずに有効扱いされる（isSubscriptionActive）ため、失効済みの権利が
+    // 遅延した再送 1 通で恒久的に復活してしまう。
+    // 期限を持たない active（買い切り・NON_RENEWING_PURCHASE 等）は
+    // acceptsCrossSourceTakeover が「有限期限より強い」と決めているので、
+    // ここで弾かない（弾くと正当な無期限の権利が ignored になる）
     const nextPeriodEnd = toDate(next.currentPeriodEnd)
-    const extendsIntoFuture =
-      nextPeriodEnd !== null && nextPeriodEnd.getTime() > Date.now()
+    const isExpiredPeriod =
+      nextPeriodEnd !== null && nextPeriodEnd.getTime() <= Date.now()
 
     const acceptsTakeover =
       current !== undefined &&
       acceptsCrossSourceTakeover(current, next) &&
-      (!isOlderThanWatermark || extendsIntoFuture)
+      (!isOlderThanWatermark || !isExpiredPeriod)
 
     // source を持たない古いデータは経路が分からないので対象外にする
     // （wasActive だけを条件にすると、現在の権利が無効なときに別経路の古い

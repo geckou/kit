@@ -311,6 +311,44 @@ describe('applySubscriptionEvent', () => {
     })
   })
 
+  // 期限を持たない active（買い切り / NON_RENEWING_PURCHASE）は
+  // 「有限期限より強い」という acceptsCrossSourceTakeover の契約どおり通す。
+  // 「古い別経路は弾く」ガードで巻き添えにしない
+  it('別経路の古いイベントでも、期限を持たない権利なら適用する', async () => {
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_stripe_active',
+        source: 'stripe' as const,
+        occurredAt: new Date('2026-08-10T00:00:00Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'stripe' as const,
+          currentPeriodEnd: new Date('2099-01-01T00:00:00Z'),
+        },
+      })
+    )
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_lifetime',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-01T00:00:00Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'revenuecat' as const,
+        },
+      })
+    )
+
+    expect(result.status).toBe('applied')
+    expect(readSubscription('user-1')).toMatchObject({
+      status: 'active',
+      source: 'revenuecat',
+    })
+  })
+
   // 逆に、権利が切れた後に別経路で新しく購入し直した形（透かしより新しい）は通す
   it('別経路でも透かしより新しいイベントは、現在の権利が無効なら適用する', async () => {
     await applySubscriptionEvent(
