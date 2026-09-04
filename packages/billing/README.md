@@ -35,8 +35,23 @@ const billing = createBilling({
 })
 
 // Express（Cloud Functions）
-app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
-  const result = await billing.handleStripeWebhook({ rawBody: req.body, headers: req.headers })
+// Functions Framework が自前のハンドラより前に JSON をパースするため、
+// 後段の express.raw() はスキップされ req.body はオブジェクトになる。
+// 署名検証に使える生のボディは req.rawBody にしか無い
+app.post('/webhooks/stripe', async (req, res) => {
+  const result = await billing.handleStripeWebhook({
+    rawBody: req.rawBody ?? req.body,
+    headers: req.headers,
+  })
+  res.status(result.status).json(result.body)
+})
+
+// RevenueCat も同じ（生のボディを JSON.parse するため、req.rawBody が要る）
+app.post('/webhooks/revenuecat', async (req, res) => {
+  const result = await billing.handleRevenueCatWebhook({
+    rawBody: req.rawBody ?? req.body,
+    headers: req.headers,
+  })
   res.status(result.status).json(result.body)
 })
 

@@ -83,6 +83,24 @@ describe('Stripe Webhook', () => {
     })
   })
 
+  it('rawBody がパース済みのオブジェクトなら 500 を返し、理由をログに出す', async () => {
+    const config = createConfig()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const result = await handleStripeWebhook(
+      config,
+      createRequest({
+        rawBody: { id: 'evt_1' } as unknown as WebhookRequest['rawBody'],
+      })
+    )
+
+    expect(result.status).toBe(500)
+    expect(mockConstructEvent).not.toHaveBeenCalled()
+    expect(errorSpy.mock.calls.flat().join(' ')).toContain('req.rawBody')
+
+    errorSpy.mockRestore()
+  })
+
   it('Stripe 未設定で 500 を返す', async () => {
     const config = createTestConfig()
 

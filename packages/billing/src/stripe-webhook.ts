@@ -1,6 +1,7 @@
 import type Stripe from 'stripe'
 
 import type { ResolvedConfig } from './config.js'
+import { assertRawBody } from './raw-body.js'
 import { mapStripeStatus } from './status-mapping.js'
 import { applySubscriptionEvent, saveStripeCustomerId } from './subscription.js'
 import type { HttpResult, WebhookRequest } from './types.js'
@@ -67,6 +68,11 @@ export async function handleStripeWebhook(
   const signature = headerValue(req.headers, 'stripe-signature')
   if (!signature) {
     return { status: 400, body: { error: 'Missing stripe-signature header' } }
+  }
+
+  const misconfigured = assertRawBody(req, 'Stripe')
+  if (misconfigured) {
+    return misconfigured
   }
 
   // 署名検証には生のリクエストボディが必要（パース前の rawBody を渡すこと）

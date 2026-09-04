@@ -93,7 +93,10 @@ export type BillingConfig = {
     webhookSecret: string
     /**
      * 購入を許可する price ID の一覧。
-     * クライアントから任意の price を渡されないよう、サーバー側で許可リストを持つ
+     * クライアントから任意の price を渡されないよう、サーバー側で許可リストを持つ。
+     *
+     * 省略時・空のときは**全ての priceId を拒否する**（安全側に倒すため）。
+     * Checkout を使うなら必ず設定すること
      */
     allowedPriceIds?: string[]
     /** Checkout 完了後のリダイレクト先 */

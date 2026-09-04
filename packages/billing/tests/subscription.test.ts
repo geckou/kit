@@ -233,6 +233,44 @@ describe('applySubscriptionEvent', () => {
     })
   })
 
+  // 回帰: stale 判定を経路をまたいで適用していたため、配信遅延で occurredAt が
+  // 前後した別経路の「より強い」権利が acceptsCrossSourceTakeover へ届かなかった
+  it('別経路なら occurredAt が古くても、期限が後ろへ伸びるなら適用する', async () => {
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_renewal',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-01T00:00:10Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'revenuecat' as const,
+          currentPeriodEnd: new Date('2026-09-01T00:00:00Z'),
+        },
+      })
+    )
+
+    const result = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_stripe_purchase',
+        source: 'stripe' as const,
+        occurredAt: new Date('2026-08-01T00:00:05Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'stripe' as const,
+          currentPeriodEnd: new Date('2027-08-01T00:00:00Z'),
+        },
+      })
+    )
+
+    expect(result.status).toBe('applied')
+    expect(readSubscription('user-1')).toMatchObject({
+      status: 'active',
+      source: 'stripe',
+    })
+  })
+
   // 回帰: 別経路の「まだ有効」がスロットを奪い、その後で同一経路の失効が通ると、
   // 生きている Stripe の権利が消えていた（ガードが「有効 → 無効」しか見ていなかった）
   it('別経路の弱い（期限が手前の）権利でスロットを奪わせない', async () => {

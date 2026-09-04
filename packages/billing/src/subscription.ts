@@ -98,10 +98,19 @@ export async function applySubscriptionEvent(
     const lastEventAt = toDate(current?.lastEventAt)
     const lastSequence = current?.lastEventSequence ?? 0
 
+    // lastEventAt / lastEventSequence は「同じ経路の中での順序制御」用。
+    // Stripe と RevenueCat のイベントは因果関係が無く時計も別なので、経路をまたいで
+    // 比較すると、遅れて届いた別経路の強い権利が stale として落ちてしまう。
+    // 経路が違うときの採否は acceptsCrossSourceTakeover だけで決める
+    // （source を持たない古いデータは経路が分からないので、同一経路として扱う）
+    const isSameSource =
+      current?.source === undefined || current.source === event.source
+
     // 同じ occurredAt のときは sequence で前後を決める。
     // Stripe の event.created は秒精度で配信順も保証されないため、日時の比較だけだと
     // 後から届いた created(incomplete) が updated(active) を上書きしてしまう
     const isStale =
+      isSameSource &&
       lastEventAt !== null &&
       (lastEventAt.getTime() > event.occurredAt.getTime() ||
         (lastEventAt.getTime() === event.occurredAt.getTime() &&

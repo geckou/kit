@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 
 import type { ResolvedConfig } from './config.js'
+import { assertRawBody } from './raw-body.js'
 import { mapRevenueCatStatus } from './status-mapping.js'
 import { applySubscriptionEvent } from './subscription.js'
 import type { HttpResult, WebhookRequest } from './types.js'
@@ -167,6 +168,11 @@ export async function handleRevenueCatWebhook(
   if (!verifyAuthorization(req.headers.authorization, expected)) {
     console.error('Invalid RevenueCat webhook authorization')
     return { status: 401, body: { error: 'Unauthorized' } }
+  }
+
+  const misconfigured = assertRawBody(req, 'RevenueCat')
+  if (misconfigured) {
+    return misconfigured
   }
 
   // 外部入力のため、パース失敗・想定外の形は 400 で返す
