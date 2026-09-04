@@ -3,7 +3,14 @@ name: Publish package
 # **このファイルの正は geckou/project-starter/.github/workflows/publish.yml。**
 # 直すときはまずそちらを直してから配ること。
 #
-# geckou/ui と同じタグ駆動。<パッケージのディレクトリ名>@<バージョン>（例: billing@0.1.0）
+# **公開は production への push で自動的に走る。** version を上げる PR がマージされた
+# 時点で、npm に載っていないバージョンを持つ公開パッケージを全部公開する。
+# タグ（`<パッケージのディレクトリ名>@<バージョン>`。scripts/release.sh が打つ）と
+# 手動実行も引き続き使えるが、通常のリリースで手を動かす必要はない。
+#
+# **どの起動経路でも「npm に未公開のバージョンだけ」を公開する。** 公開済みのものは
+# 対象から外れて publish ジョブごと skip される。タグ push・再実行・公開後のタグ打ちが
+# 何度起きても副作用が無い（冪等）。
 #
 # **公開できるのは production に入っているコミットだけ。** タグも workflow_dispatch も
 # 任意の ref から起動できるため、そのままだと未マージのブランチをチェックアウトした実行で
@@ -13,6 +20,10 @@ name: Publish package
 #   1. タグ（または dispatch した ref）のコミットが origin/production に含まれること
 #   2. タグのバージョン部分が、対象 package.json の version と一致すること
 #
+# 対象を決める targets ジョブは npm-publish Environment を通さず、依存のインストールも
+# 行わない（package.json を読んで npm view を叩くだけ）。公開の権限を持つのは publish
+# ジョブだけで、そこへ渡るのは検査を通ったケバブケースのディレクトリ名に限られる。
+#
 # 公開の認証は npm の Trusted Publishing（GitHub Actions の OIDC）で行う。
 # NPM_TOKEN のような長期シークレットは持たず、実行のたびに短命なトークンが発行される。
 # npm 側で各パッケージに Trusted Publisher（このリポジトリ + このワークフローファイル名
@@ -20,10 +31,11 @@ name: Publish package
 #
 # npm 側の紐付けは「リポジトリ + ワークフロー」単位なので、どの ref から起動されたかは
 # 上の検査と、npm-publish Environment の「Deployment branches and tags」で担保する。
-# 許可するのはタグ `*@*`（通常のリリース）と production ブランチ（workflow_dispatch）の
-# 2 つ。タグだけにすると dispatch が弾かれる。
+# 許可するのはタグ `*@*`（release.sh 経由のリリース）と production ブランチ
+# （自動公開と workflow_dispatch）の 2 つ。どちらか片方だけにすると他方が弾かれる。
 on:
   push:
+    branches: [production]
     tags: ['*@*']
   workflow_dispatch:
     inputs:
@@ -33,13 +45,13 @@ on:
 
 permissions:
   contents: read
-  # Trusted Publishing（OIDC）で npm へ認証するために必要
-  id-token: write
 
 jobs:
-  publish:
+  # 何を公開するかだけを決める。公開の権限（id-token / npm-publish Environment）は持たない
+  targets:
     runs-on: ubuntu-latest
-    environment: npm-publish
+    outputs:
+      packages: ${{ steps.resolve.outputs.packages }}
 
     steps:
       - uses: actions/checkout@v7
@@ -48,71 +60,141 @@ jobs:
           fetch-depth: 0
 
       # レビューを通っていないコミットからの公開を止める。依存インストール（= その ref の
-      # コードの実行）より前に置く。push（タグ）でも workflow_dispatch でも
+      # コードの実行）より前に置く。push でも workflow_dispatch でも
       # GITHUB_SHA は起動した ref の先頭を指す
       - name: Verify the commit is on production
         run: |
           git fetch --no-tags --quiet origin production
 
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/production; then
-            echo "::error::${GITHUB_SHA} は origin/production に含まれていません。version を上げる PR をマージしたうえで、production でタグを打つ（yarn release <パッケージ>）か、手動実行なら Use workflow from に production を選んでください"
+            echo "::error::${GITHUB_SHA} は origin/production に含まれていません。version を上げる PR を production へマージしてください（マージした時点で自動的に公開されます）。手動実行なら Use workflow from に production を選んでください"
             exit 1
           fi
 
-      - name: Resolve target package
-        id: target
+      - uses: actions/setup-node@v7
+        with:
+          # npm view を叩いて package.json を読むだけだが、publish ジョブと同じ Node で
+          # 読むほうが読み違いが起きにくい
+          node-version: '>=22.14.0'
+          # registry-url は指定しない（理由は publish ジョブ側のコメント）
+
+      - name: Resolve target packages
+        id: resolve
         # [[ ... =~ ... ]] は bash 固有。既定シェルが変わっても壊れないよう明示する
         shell: bash
+        # 入力は式展開（${{ }}）ではなく環境変数で渡す。シェルに直接埋めると、
+        # 手動実行の入力に任意のコマンドを仕込めてしまう
         env:
           INPUT_PACKAGE: ${{ github.event.inputs.package }}
         run: |
+          CANDIDATES=()
+
           if [ -n "$INPUT_PACKAGE" ]; then
-            PACKAGE="$INPUT_PACKAGE"
+            CANDIDATES=("$INPUT_PACKAGE")
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            CANDIDATES=("${GITHUB_REF_NAME%@*}")
           else
-            PACKAGE="${GITHUB_REF_NAME%@*}"
+            # production への push。公開パッケージを全部候補にして、下で
+            # 「npm に未公開のバージョンを持つもの」だけに絞る
+            for PACKAGE_JSON in packages/*/package.json; do
+              [ -f "$PACKAGE_JSON" ] || continue
+              CANDIDATES+=("$(basename "$(dirname "$PACKAGE_JSON")")")
+            done
           fi
 
-          # パッケージ名はタグ名か手動実行の入力から来て、そのままパスの一部になる。
-          # 先に形式を検査して、../ によるパストラバーサルと、後続の node へ渡す
-          # 文字列への注入の余地を消す（ディレクトリ名はケバブケースに限る）
-          # grep は行単位で照合するため、改行を含む値だと「1行でも一致すれば通過」に
-          # なってしまう（後続の GITHUB_OUTPUT への書き込みが注入される）。
-          # bash の =~ は文字列全体を見るので、改行混じりの値をここで落とせる
-          if [[ ! "$PACKAGE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
-            # 検査に落ちた値はそのまま出さない。改行を含む値だと 2 行目が
-            # ワークフローコマンド（::warning:: 等）として解釈されるため。
-            # 値そのものはタグ名・実行時の入力として run の画面に出ている
-            echo "::error::パッケージ名の形式が不正です（ケバブケースのディレクトリ名のみ）。タグ名か手動実行の入力を確認してください"
-            exit 1
-          fi
+          SELECTED=()
 
-          PACKAGE_JSON="$PWD/packages/$PACKAGE/package.json"
-
-          if [ ! -f "$PACKAGE_JSON" ]; then
-            echo "::error::packages/$PACKAGE が存在しません（ref: $GITHUB_REF_NAME）"
-            exit 1
-          fi
-
-          # パスは環境変数で渡す（node の式に文字列として展開しない）
-          if [ "$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).private === true')" = "true" ]; then
-            echo "::error::packages/$PACKAGE は private です（公開対象ではありません）"
-            exit 1
-          fi
-
-          # タグ起動のときは、タグのバージョン部分と package.json の version の一致を見る。
-          # ずれていると、タグが指すものと実際に公開されるものが食い違う
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            TAG_VERSION="${GITHUB_REF_NAME##*@}"
-            # パスは環境変数で渡す（node の式に文字列として展開しない）
-            VERSION="$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).version')"
-
-            if [ "$TAG_VERSION" != "$VERSION" ]; then
-              echo "::error::タグ $GITHUB_REF_NAME と packages/$PACKAGE/package.json の version ($VERSION) が一致しません"
+          for PACKAGE in ${CANDIDATES[@]+"${CANDIDATES[@]}"}; do
+            # パッケージ名はタグ名か手動実行の入力から来て、そのままパスの一部になる。
+            # 先に形式を検査して、../ によるパストラバーサルと、後続の node へ渡す
+            # 文字列への注入の余地を消す（ディレクトリ名はケバブケースに限る）。
+            # grep ではなく [[ =~ ]] を使うのは、grep が行単位で照合するため
+            # 改行を含む値だと 1 行目の一致で通過してしまうから
+            if [[ ! "$PACKAGE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              # 検査に落ちた値はそのまま出さない。改行を含む値だと 2 行目が
+              # ワークフローコマンド（::warning:: 等）として解釈されるため。
+              # 値そのものはタグ名・実行時の入力として run の画面に出ている
+              echo "::error::パッケージ名の形式が不正です（ケバブケースのディレクトリ名のみ）。タグ名か手動実行の入力を確認してください"
               exit 1
             fi
-          fi
 
-          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+            PACKAGE_JSON="$PWD/packages/$PACKAGE/package.json"
+
+            if [ ! -f "$PACKAGE_JSON" ]; then
+              echo "::error::packages/$PACKAGE が存在しません（ref: $GITHUB_REF_NAME）"
+              exit 1
+            fi
+
+            # パスは環境変数で渡す（node の式に文字列として展開しない）
+            if [ "$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).private === true')" = "true" ]; then
+              # production への push では候補を自動で集めているので、private は黙って飛ばす。
+              # 名指しで指定されたときだけエラーにする
+              if [ "$GITHUB_REF_TYPE" = "tag" ] || [ -n "$INPUT_PACKAGE" ]; then
+                echo "::error::packages/$PACKAGE は private です（公開対象ではありません）"
+                exit 1
+              fi
+
+              continue
+            fi
+
+            NAME="$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).name')"
+            VERSION="$(PACKAGE_JSON="$PACKAGE_JSON" node -p 'require(process.env.PACKAGE_JSON).version')"
+
+            # タグ起動のときは、タグのバージョン部分と package.json の version の一致を見る。
+            # ずれていると、タグが指すものと実際に公開されるものが食い違う
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              TAG_VERSION="${GITHUB_REF_NAME##*@}"
+
+              if [ "$TAG_VERSION" != "$VERSION" ]; then
+                echo "::error::タグ $GITHUB_REF_NAME と packages/$PACKAGE/package.json の version ($VERSION) が一致しません"
+                exit 1
+              fi
+            fi
+
+            # 未公開なら npm view はエラー（パッケージ未登録）か空（バージョン未登録）になる。
+            # ここで落としておくと、公開済みのバージョンに対する起動（タグの打ち直し、
+            # version を上げていない production への push、再実行）で publish ごと skip される
+            if [ -n "$(npm view "$NAME@$VERSION" version 2> /dev/null || true)" ]; then
+              echo "$NAME@$VERSION は既に公開済みです。対象から外します"
+              continue
+            fi
+
+            echo "$NAME@$VERSION を公開します"
+            SELECTED+=("$PACKAGE")
+          done
+
+          # 名前がケバブケースであることは上で検査済みなので、そのまま JSON に埋めてよい
+          JSON="["
+
+          for PACKAGE in ${SELECTED[@]+"${SELECTED[@]}"}; do
+            JSON="$JSON\"$PACKAGE\","
+          done
+
+          JSON="${JSON%,}]"
+
+          echo "公開対象: $JSON"
+          echo "packages=$JSON" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: targets
+    # 公開対象が無ければ動かさない（matrix が空でもジョブは skip されるが、
+    # 意図が読めるように条件も書いておく）
+    if: needs.targets.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      # Trusted Publishing（OIDC）で npm へ認証するために必要
+      id-token: write
+    strategy:
+      # 1 つの公開が失敗しても、他のパッケージの公開は続ける。
+      # 途中で止めると「どこまで公開されたか」を人が追いにくくなる
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.targets.outputs.packages) }}
+
+    steps:
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
@@ -136,23 +218,16 @@ jobs:
       - name: Build all packages
         run: yarn build
 
-      # 公開済みのバージョンに対して起動されることがある（初回リリースを
-      # workflow_dispatch で行い、記録のために後からタグを打つ場合など）。
-      # その場合 npm publish は必ず失敗するので、実行を冪等にする
+      # 公開済みの型定義と比べて、破壊的変更が patch に載っていないかを見る
+      # （geckou/project-starter#155）。release.sh がタグを打つ前に行う検査と同じもので、
+      # 自動公開ではここが唯一の実行機会になる。判定できない場合は素通しする安全網
+      - name: Check for breaking changes in a patch release
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: node scripts/check-api-diff.mjs "$PACKAGE"
+
       - name: Publish to npm
-        working-directory: packages/${{ steps.target.outputs.package }}
-        run: |
-          NAME="$(node -p "require('./package.json').name")"
-          VERSION="$(node -p "require('./package.json').version")"
-
-          # 未公開なら npm view はエラー（パッケージ未登録）か空（バージョン未登録）になる
-          PUBLISHED="$(npm view "$NAME@$VERSION" version 2>/dev/null || true)"
-
-          if [ -n "$PUBLISHED" ]; then
-            echo "$NAME@$VERSION は既に公開済みのため、publish をスキップします"
-            exit 0
-          fi
-
-          # --provenance: どのコミット・どのワークフローから公開されたかの証明を
-          # npm に添付する（OIDC で公開するときだけ付けられる）
-          npm publish --access public --provenance
+        working-directory: packages/${{ matrix.package }}
+        # --provenance: どのコミット・どのワークフローから公開されたかの証明を
+        # npm に添付する（OIDC で公開するときだけ付けられる）
+        run: npm publish --access public --provenance
