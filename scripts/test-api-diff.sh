@@ -293,6 +293,43 @@ else
 fi
 
 rm -rf "$work"
+echo ""
+
+echo "[8] ブロックしたときの後片付けと出力先"
+work=$(mktemp -d)
+tmp=$(mktemp -d)
+make_package "$work" 'export declare const demo: string[]'
+published=$(pack_published "$work")
+printf 'export declare const demo: (string | number)[]\n' > "$work/packages/demo/dist/index.d.ts"
+
+output=$(cd "$work" && TMPDIR="$tmp" node "$SCRIPT" demo --published-tarball "$published" 2>&1)
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  pass "型が変わっていれば止める（後片付けの前提）"
+else
+  fail "止まらなかったので後片付けを検証できない" "$output"
+fi
+
+# process.exit で抜けると finally が走らず、展開物が tmpdir に溜まっていた
+leftovers=$(find "$tmp" -maxdepth 1 -name 'api-diff-*' 2>/dev/null)
+
+if [ -z "$leftovers" ]; then
+  pass "ブロック時も一時ディレクトリを消す"
+else
+  fail "一時ディレクトリが残った" "$leftovers"
+fi
+
+# 見出しと差分の出力先が割れていると、2>/dev/null したときに差分だけが文脈なしで残る
+output=$(cd "$work" && node "$SCRIPT" demo --published-tarball "$published" 2>/dev/null)
+
+if ! printf '%s' "$output" | grep -q 'dist/index.d.ts'; then
+  pass "差分は stderr に出す（見出しと同じ側）"
+else
+  fail "差分だけが stdout に出ている" "$output"
+fi
+
+rm -rf "$work" "$tmp"
 
 echo ""
 echo "=== 結果: ${passed} 件成功 / ${failed} 件失敗 ==="

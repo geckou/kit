@@ -108,12 +108,48 @@ function readManifest(packageDir) {
   return JSON.parse(fs.readFileSync(file, 'utf8'))
 }
 
-// メジャー / マイナーが上がっていれば、破壊的変更を出してよい版として扱う
-function isPatchOnly(published, next) {
-  const [publishedMajor, publishedMinor] = published.split('.').map(Number)
+// 比較対象は「これから出す版と同じ major.minor の、公開済みで最大の patch」。
+// npm view <name> version（= latest）だけを見ると、0.3.0 が公開済みの状態で
+// 0.2.x 系のバックポート 0.2.5 を出したときに「minor が違うので検査不要」と
+// 判定され、比べるべき 0.2.4 とは比べないまま素通りする。
+//
+// 同じ系列に公開済みの版が無ければ null を返す（= 新しい major / minor なので
+// 破壊的変更を出してよい版。検査しない）。
+function pickBaseVersion(name, next) {
+  const raw = tryRun('npm', ['view', name, 'versions', '--json'])
+
+  if (raw === null) return { available: false, version: null }
+
+  let parsed
+
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { available: false, version: null }
+  }
+
+  // 公開が 1 件だけのとき npm は配列ではなく文字列を返す
+  const versions = Array.isArray(parsed) ? parsed : [parsed]
   const [nextMajor, nextMinor] = next.split('.').map(Number)
 
-  return publishedMajor === nextMajor && publishedMinor === nextMinor
+  const sameSeries = versions
+    // prerelease（1.0.0-rc1 等）は比較対象にしない
+    .filter((version) => typeof version === 'string' && !version.includes('-'))
+    .map((version) => ({ version, parts: version.split('.').map(Number) }))
+    .filter(
+      ({ version, parts }) =>
+        parts.length === 3 &&
+        parts.every(Number.isInteger) &&
+        parts[0] === nextMajor &&
+        parts[1] === nextMinor &&
+        version !== next
+    )
+    .sort((a, b) => a.parts[2] - b.parts[2])
+
+  return {
+    available: true,
+    version: sameSeries.length > 0 ? sameSeries.at(-1).version : null,
+  }
 }
 
 // 展開できないときは null を返す（壊れたダウンロード等で誤ってブロックしないため）
@@ -182,9 +218,11 @@ function diffTrees(before, after, extension) {
   return { changed, hadTypes: beforeFiles.length > 0 || afterFiles.length > 0 }
 }
 
+// 前後の見出しが stderr なので差分も stderr に出す。
+// 混ざっていると `2>/dev/null` したときに差分だけが文脈なしで残る
 function printDiff(before, after, changed) {
   for (const { file, status } of changed.slice(0, 5)) {
-    console.log(`    ${status} ${file}`)
+    console.error(`    ${status} ${file}`)
 
     if (status !== '変更') continue
 
@@ -194,11 +232,11 @@ function printDiff(before, after, changed) {
       .filter((line) => /^[+-]/.test(line) && !/^[+-]{3}/.test(line))
       .slice(0, 8)
 
-    for (const line of lines) console.log(`      ${line}`)
+    for (const line of lines) console.error(`      ${line}`)
   }
 
   if (changed.length > 5) {
-    console.log(`    ...ほか ${changed.length - 5} ファイル`)
+    console.error(`    ...ほか ${changed.length - 5} ファイル`)
   }
 }
 
@@ -223,23 +261,24 @@ function main() {
   const name = manifest.name
   const version = manifest.version
 
-  const publishedVersion =
-    options.publishedTarball !== null
-      ? null
-      : tryRun('npm', ['view', name, 'version'])
+  let publishedVersion = null
 
   if (options.publishedTarball === null) {
-    if (publishedVersion === null) {
+    const base = pickBaseVersion(name, version)
+
+    if (!base.available) {
       console.log(`[skip] ${name} は未公開か、npm を参照できませんでした`)
       return
     }
 
-    if (!isPatchOnly(publishedVersion, version)) {
+    if (base.version === null) {
       console.log(
-        `[ok] ${name} ${publishedVersion} → ${version}（patch ではないので API 差分は検査しません）`
+        `[ok] ${name} ${version} と同じ major.minor の公開済みの版はありません（patch ではないので API 差分は検査しません）`
       )
       return
     }
+
+    publishedVersion = base.version
   }
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'api-diff-'))
@@ -329,15 +368,18 @@ function main() {
       '  破壊的変更なら minor 以上に上げてください。互換性のある追加なら --force で続行できます。'
     )
 
-    process.exit(EXIT_BLOCKED)
+    // process.exit だと finally が走らず、一時ディレクトリが残る。
+    // 終了コードは返して、呼び出し側で process.exitCode に入れる
+    return EXIT_BLOCKED
   } finally {
     fs.rmSync(work, { recursive: true, force: true })
   }
 }
 
 try {
-  main()
+  // main は「止めるとき」だけ終了コードを返す（それ以外は undefined）
+  process.exitCode = main() ?? 0
 } catch (error) {
   console.error(`[error] ${error.message}`)
-  process.exit(1)
+  process.exitCode = 1
 }

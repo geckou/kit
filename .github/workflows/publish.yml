@@ -42,6 +42,10 @@ on:
       package:
         description: 公開するパッケージのディレクトリ名（billing 等）
         required: true
+      force:
+        description: 破壊的変更の検査を飛ばす（互換の追加だと分かっているときだけ）
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -242,13 +246,17 @@ jobs:
       # 公開済みの型定義と比べて、破壊的変更が patch に載っていないかを見る
       # （geckou/project-starter#155）。判定できない場合は素通しする安全網。
       #
-      # **自動公開のときだけ実行する。** タグ起動なら release.sh が打つ前に同じ検査を
+      # **タグ起動のときだけ飛ばす。** タグ起動なら release.sh が打つ前に同じ検査を
       # 済ませており、そこには「互換の追加だと分かっている」場合の --force がある。
       # ここで無条件に見ると --force が効かなくなり、検査に引っかかった版を
       # どの経路からも公開できなくなる（自動公開が止まったときの逃げ道が、
-      # yarn release <パッケージ> --force でタグを打つこと）
+      # yarn release <パッケージ> --force でタグを打つこと）。
+      #
+      # workflow_dispatch は release.sh を通らないので検査を済ませていない。
+      # 飛ばしたいときは inputs.force を明示する（何も指定しない手動実行が
+      # 検査を素通りする経路にならないようにする）
       - name: Check for breaking changes in a patch release
-        if: github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
+        if: github.ref_type != 'tag' && !inputs.force
         env:
           PACKAGE: ${{ matrix.package }}
         run: node scripts/check-api-diff.mjs "$PACKAGE"
