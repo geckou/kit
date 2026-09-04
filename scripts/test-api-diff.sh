@@ -15,9 +15,12 @@ set -u
 #   5. ビルドできない環境では止めない（検査できないだけ）
 #   6. tarball を展開できないときは止めない
 #   7. 存在しないパッケージ・引数なしはエラーになる
+#   8. ブロック時も一時ディレクトリを消し、差分は stderr に出す
+#   9. 比較対象に「同じ major.minor の公開済み最大 patch」を選ぶ
 #
 # 公開物の取得は --published-tarball で差し替える（ネットワークに依存させないため）。
-# npm view / curl 経由の経路は、その性質上ここでは検証できない。
+# 比較対象の選択（npm view）だけは偽の npm を PATH の先頭に置いて検証する。
+# curl 経由のダウンロードは、その性質上ここでは検証できない。
 
 cd "$(dirname "$0")/.."
 REPO_ROOT=$(pwd)
@@ -338,6 +341,107 @@ else
 fi
 
 rm -rf "$work" "$tmp"
+echo ""
+
+echo "[9] 比較対象の選び方（npm view）"
+
+# --published-tarball を渡さない経路を検証する。偽の npm を PATH の先頭に置き、
+# `npm view <name> versions --json` の出力を差し替える。
+# 実際のダウンロード（curl）まで進むと止まるので、判定に使うのは
+# 「どのバージョンと比較しようとしたか」を示すメッセージだけにする。
+# どのバージョンと比較しようとしたかは、続く `npm view <name>@<version> dist.tarball`
+# の引数に現れる。偽の npm に呼び出しを記録させて、そこを直接見る
+# （tarball の取得は curl 経由なのでここでは進めない）
+LAST_OUTPUT=''
+LAST_CALLS=''
+
+# check_versions <公開済みバージョンの JSON> <これから出す version>
+check_versions() {
+  local versions=$1
+  local next=$2
+  local dir
+
+  dir=$(mktemp -d)
+  make_package "$dir" 'export declare const demo: number' "$next"
+
+  mkdir -p "$dir/bin"
+  cat > "$dir/bin/npm" <<FAKE
+#!/bin/sh
+printf '%s\n' "\$*" >> "$dir/npm-calls.log"
+# view <name> versions --json だけ答える。それ以外は「取得できない」を返す
+if [ "\$1" = view ] && [ "\$3" = versions ]; then
+  printf '%s\n' '$versions'
+  exit 0
+fi
+exit 1
+FAKE
+  chmod +x "$dir/bin/npm"
+
+  LAST_OUTPUT=$(cd "$dir" && PATH="$dir/bin:$PATH" node "$SCRIPT" demo 2>&1)
+  LAST_CALLS=$(cat "$dir/npm-calls.log" 2>/dev/null || true)
+
+  rm -rf "$dir"
+}
+
+# 0.3.0 が公開済みでも、0.2.x のバックポートは 0.2 系の最大 patch と比べる。
+# latest とだけ比べる作りだと「minor が違う」として素通りしていた
+check_versions '["0.1.0","0.2.4","0.2.10","0.2.9","0.3.0"]' '0.2.5'
+
+if printf '%s' "$LAST_CALLS" | grep -q 'view @geckou/demo@0\.2\.10 dist\.tarball'; then
+  pass "同じ major.minor の最大 patch を選ぶ（patch は数値で比べる）"
+else
+  fail "バックポート時の比較対象が違う" "$LAST_CALLS"
+fi
+
+if ! printf '%s' "$LAST_OUTPUT" | grep -q '検査しません'; then
+  pass "バックポートを「検査不要」と判定しない"
+else
+  fail "バックポートが素通りしている" "$LAST_OUTPUT"
+fi
+
+# 公開が 1 件だけのとき npm は配列ではなく文字列を返す
+check_versions '"0.2.1"' '0.2.2'
+
+if printf '%s' "$LAST_CALLS" | grep -q 'view @geckou/demo@0\.2\.1 dist\.tarball'; then
+  pass "単一文字列の応答も扱える"
+else
+  fail "単一文字列の応答を扱えていない" "$LAST_CALLS"
+fi
+
+# prerelease は比較対象にしない
+check_versions '["0.2.1","0.2.2-rc1"]' '0.2.3'
+
+if printf '%s' "$LAST_CALLS" | grep -q 'view @geckou/demo@0\.2\.1 dist\.tarball'; then
+  pass "prerelease は比較対象から外す"
+else
+  fail "prerelease を比較対象にしている" "$LAST_CALLS"
+fi
+
+# 同じ系列に公開済みが無ければ（新しい minor）検査しない
+check_versions '["0.2.1","0.2.2"]' '0.3.0'
+
+if printf '%s' "$LAST_OUTPUT" | grep -q '検査しません'; then
+  pass "同じ major.minor が無ければ検査しない"
+else
+  fail "新しい minor で検査しようとした" "$LAST_OUTPUT"
+fi
+
+# npm を参照できないときは素通しする（事故を防ぐ安全網であって、公開を守る仕組みではない）
+broken=$(mktemp -d)
+make_package "$broken" 'export declare const demo: number' '0.2.5'
+mkdir -p "$broken/bin"
+printf '#!/bin/sh\nexit 1\n' > "$broken/bin/npm"
+chmod +x "$broken/bin/npm"
+output=$(cd "$broken" && PATH="$broken/bin:$PATH" node "$SCRIPT" demo 2>&1)
+status=$?
+
+if [ "$status" -eq 0 ] && printf '%s' "$output" | grep -q '未公開か'; then
+  pass "npm を参照できないときは素通しする"
+else
+  fail "npm 参照失敗の扱いが違う（status=$status）" "$output"
+fi
+
+rm -rf "$broken"
 
 echo ""
 echo "=== 結果: ${passed} 件成功 / ${failed} 件失敗 ==="
