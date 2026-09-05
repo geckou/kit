@@ -109,6 +109,11 @@ revenuecat: {
 `users/{app_user_id}` で、`Purchases.logIn(uid)` していない匿名 ID のままだと
 `users/$RCAnonymousID:...` が作られ、そのユーザーの権利はどこからも参照されない。
 
+`app_user_id` はクライアントが自由に決められる値なので、Firestore の
+ドキュメント ID にできない値（`/` を含む・`.` / `..`・`__x__` の形・1500 バイト超）は
+**400 で弾く**。そのまま `doc()` に渡すと同期 throw して 500 になり、
+RevenueCat が再送を繰り返すため。
+
 ### Checkout とプラン変更
 
 `createCheckoutSession` は **新規契約のみ**を扱う。既に有効な購読を持つユーザーには
@@ -154,7 +159,11 @@ import type { Subscription } from '@geckou/billing/entitlement'
 有効で、かつイベントの経路が違う場合、次のどれかを満たさないと適用しない。
 
 - 反映後も有効で、`currentPeriodEnd` が今より後ろへ伸びる
-- 反映後も有効で、今は期限を持つがイベント側は期限を持たない（無期限とみなす）
+- イベント側が `active` で期限を持たず（買い切り等の無期限）、今の権利は期限を持つ
+
+期限を持たない `in_grace_period` / `cancelled` は「無期限」ではなく、単に期限
+フィールドが欠けているだけの可能性がある。これを最強として扱うと、期限を持たない
+`BILLING_ISSUE` が生きている権利のスロットを奪い、直後の `EXPIRATION` で権利が消える。
 
 日時と `sequence` だけで前後を決めると、次の 2 通りで生きている権利が消える。
 
@@ -165,9 +174,44 @@ import type { Subscription } from '@geckou/billing/entitlement'
 無視したイベントは `applied: false` で記録し、警告をログに出す
 （`ApplyResult.status` は `'ignored'`）。
 
+### 反映後の副作用と再送
+
+カスタムクレームの同期と権利変化フック（`onSubscriptionUpgraded` /
+`onSubscriptionDowngraded`）は、Firestore への反映が確定した後に実行する。
+ここで失敗した場合は **`ApplyResult.effectsPending` が true になり、Webhook ハンドラは
+503 を返す**。200 を返すとプロバイダは配信成功と見なして再送せず、失敗した副作用が
+二度と実行されないため。権利状態そのものは書き込み済みなので、再送は `'duplicate'`
+として扱われ、**失敗した種類（`billing_events/{id}.failedEffects`）だけがやり直される**。
+成功済みのフックは二度呼ばれない。
+
+再送の判定に使う遷移（`wasActive` / `isActive`）は初回適用時の値をイベント側に残して使う。
+現在の状態から計算し直すと、期限付きの権利が切れた後の再送で「無効 → 無効」に見え、
+失敗したままのフックが呼ばれない。
+
+同じイベントが**並行して**届く場合に備えて、副作用の実行権（`effectsClaimedAt`、60 秒）を
+トランザクションの中で取る。先に取った側だけが実行し、実行中にプロセスが落ちても
+期限切れで次の再送が引き継ぐ。
+
+現在の `subscription.lastEventId` がそのイベントでなくなっている場合
+（後続のイベントが既にスロットを上書きしている場合）はやり直さず、完了として記録する。
+古い状態でクレームを書き戻さないため。
+
+> フックが恒久的に失敗する（実装のバグ等）と、プロバイダの再送が続く。
+> ログ（`post-apply effects failed`）を監視して、原因側を直すこと。
+
 **同じ経路の遷移は従来どおり全て適用する。** 経路ごとに権利を保持して OR を取る形には
 していない（`Subscription` の形が変わるため）。両経路の購入を UI から防ぎたい場合は、
 IAP の購入画面側でも権利を確認すること。
+
+### 0.6.0 の変更
+
+- `ApplyResult` に `effectsPending` が増えた。反映後の副作用が失敗したことを表す
+  （Webhook ハンドラはこれを見て 503 を返す）。`ApplyResult` を自分で組み立てている
+  コードは追従が要る
+- 副作用の再実行に実行権（`billing_events/{id}.effectsClaimedAt`）を使う
+- `TRANSFER` の派生イベント ID が `<eventId>:from:<app_user_id のハッシュ>` になった
+  （長い `app_user_id` でドキュメント ID の上限を超えないようにするため）。
+  この変更より前に処理した TRANSFER は、再送されると 1 度だけ再適用されうる
 
 ### 0.3.0 の破壊的変更
 
