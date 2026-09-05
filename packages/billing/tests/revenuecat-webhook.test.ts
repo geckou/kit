@@ -145,7 +145,11 @@ describe('RevenueCat Webhook', () => {
   it.each([
     ['RENEWAL', 'active'],
     ['UNCANCELLATION', 'active'],
+    ['PRODUCT_CHANGE', 'active'],
+    ['NON_RENEWING_PURCHASE', 'active'],
+    ['SUBSCRIPTION_EXTENDED', 'active'],
     ['BILLING_ISSUE', 'in_grace_period'],
+    ['SUBSCRIPTION_PAUSED', 'cancelled'],
     ['EXPIRATION', 'expired'],
   ])('%s を %s として反映する', async (type, status) => {
     await handleRevenueCatWebhook(
@@ -159,6 +163,52 @@ describe('RevenueCat Webhook', () => {
         subscription: expect.objectContaining({ status }),
       })
     )
+  })
+
+  it.each([
+    ['スラッシュを含む', 'a/b'],
+    ['.', '.'],
+    ['..', '..'],
+    ['予約語の形', '__name__'],
+  ])(
+    'ドキュメント ID にできない app_user_id（%s）は 400 で弾き、再送させない',
+    async (_label, appUserId) => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const result = await handleRevenueCatWebhook(
+        createConfig(),
+        createRequest(createEventBody('RENEWAL', appUserId), authed)
+      )
+
+      expect(result.status).toBe(400)
+      expect(mockApplySubscriptionEvent).not.toHaveBeenCalled()
+
+      errorSpy.mockRestore()
+    }
+  )
+
+  it('TRANSFER の transferred_from に不正な app_user_id が混ざっても、正しい側だけ処理する', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const result = await handleRevenueCatWebhook(
+      createConfig(),
+      createRequest(
+        createEventBody('TRANSFER', 'anonymous', {
+          transferred_from: ['a/b', 'user-old'],
+          transferred_to: [],
+        }),
+        authed
+      )
+    )
+
+    expect(result.status).toBe(200)
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledTimes(1)
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ uid: 'user-old' })
+    )
+
+    errorSpy.mockRestore()
   })
 
   it('CANCELLATION は cancelled（期間終了までは有効）として反映する', async () => {
