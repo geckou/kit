@@ -1,6 +1,6 @@
 {
   "name": "@geckou/billing",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Subscription entitlement and webhook handling (Stripe / RevenueCat) for Firebase-based projects",
   "type": "commonjs",
   "main": "./dist/index.js",

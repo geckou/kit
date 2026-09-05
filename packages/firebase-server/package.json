@@ -1,6 +1,6 @@
 {
   "name": "@geckou/firebase-server",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Server-side Firebase helpers (Auth middleware / FCM push) for Cloud Functions and other Node servers",
   "type": "commonjs",
   "main": "./dist/index.js",

@@ -47,6 +47,13 @@ export type BatchPushResult = {
   failureCount: number
   /** 保存先から削除すべきトークン（恒久的に失敗したもの） */
   invalidTokens: string[]
+  /**
+   * 送信そのものが失敗した分割チャンク。
+   * 空でなければ、そのチャンクのトークンは 1 件も送られていない。
+   * 再試行するときは `tokens` だけを送り直す（全件を送り直すと、
+   * 成功済みのトークンに通知が二重に届く）
+   */
+  errors: { error: unknown; tokens: string[] }[]
 }
 
 /**
@@ -75,6 +82,10 @@ export async function sendPushNotification(
  *
  * 恒久的に失敗したトークン（アンインストール済み端末など）は invalidTokens で返す。
  * 呼び出し側で保存先から削除しないと溜まり続け、送信のたびに失敗数が増える。
+ *
+ * 途中のチャンクが throw しても、それまでの成功数と invalidTokens は返す。
+ * 全体を巻き戻すと、呼び出し側が無効トークンを削除できず次回も同じ失敗を繰り返す。
+ * 失敗したチャンクは failureCount に計上し、エラーは errors で返す。
  */
 export async function sendPushNotificationBatch(
   messaging: MessagingLike,
@@ -85,6 +96,7 @@ export async function sendPushNotificationBatch(
     successCount: 0,
     failureCount: 0,
     invalidTokens: [],
+    errors: [],
   }
 
   for (
@@ -94,25 +106,34 @@ export async function sendPushNotificationBatch(
   ) {
     const tokens = fcmTokens.slice(index, index + MAX_TOKENS_PER_REQUEST)
 
-    const response = await messaging.sendEachForMulticast({
-      tokens,
-      notification: {
-        title: payload.title,
-        body: payload.body,
-      },
-      data: payload.data,
-    })
+    try {
+      const response = await messaging.sendEachForMulticast({
+        tokens,
+        notification: {
+          title: payload.title,
+          body: payload.body,
+        },
+        data: payload.data,
+      })
 
-    result.successCount += response.successCount
-    result.failureCount += response.failureCount
+      result.successCount += response.successCount
+      result.failureCount += response.failureCount
 
-    response.responses?.forEach((each, position) => {
-      const code = each.error?.code
+      response.responses?.forEach((each, position) => {
+        const code = each.error?.code
 
-      if (!each.success && code && INVALID_TOKEN_ERROR_CODES.includes(code)) {
-        result.invalidTokens.push(tokens[position])
-      }
-    })
+        if (!each.success && code && INVALID_TOKEN_ERROR_CODES.includes(code)) {
+          result.invalidTokens.push(tokens[position])
+        }
+      })
+    } catch (error) {
+      result.failureCount += tokens.length
+      result.errors.push({ error, tokens })
+      console.error(
+        `Failed to send a push notification chunk (${tokens.length} tokens)`,
+        error
+      )
+    }
   }
 
   return result

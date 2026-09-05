@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import crypto from 'node:crypto'
 
 import type { ResolvedConfig } from './config.js'
 import { assertRawBody } from './raw-body.js'
@@ -24,6 +24,47 @@ type RevenueCatEvent = {
     /** TRANSFER で権利を受け取る側の app_user_id */
     transferred_to?: string[]
   }
+}
+
+/**
+ * Firestore のドキュメント ID として使える文字列か。
+ *
+ * app_user_id はクライアントが Purchases.logIn() で自由に決められる値で、
+ * そのまま doc() に渡すと `/` を含むだけで同期 throw する。catch されて 500 を
+ * 返すと RevenueCat が再送し続けるため、受け取る前に弾く
+ */
+function isValidDocumentId(id: string): boolean {
+  return (
+    id.length > 0 &&
+    Buffer.byteLength(id) <= 1500 &&
+    !id.includes('/') &&
+    id !== '.' &&
+    id !== '..' &&
+    !/^__.*__$/.test(id)
+  )
+}
+
+/**
+ * 派生イベント ID に混ぜるための固定長の識別子。
+ * app_user_id は 1500 バイトまで許されるので、そのまま繋ぐと記録先の
+ * ドキュメント ID が上限を超える
+ */
+function shortUid(uid: string): string {
+  return crypto.createHash('sha256').update(uid).digest('hex').slice(0, 16)
+}
+
+/**
+ * 反映は済んだが副作用（クレーム同期・権利変化フック）が残っている状態。
+ * 200 を返すと再送されず二度と実行されないため、あえて 5xx を返す
+ * （権利状態そのものは書き込み済みなので、再送は duplicate として扱われ、
+ *  失敗した副作用だけがやり直される）
+ */
+function effectsPendingResult(): HttpResult {
+  console.error(
+    'RevenueCat event applied but its post-apply effects failed; asking for a retry'
+  )
+
+  return { status: 503, body: { error: 'Effects pending' } }
 }
 
 /** 有限な数値のみ受け取る（NaN・文字列・undefined は null にする） */
@@ -80,17 +121,27 @@ async function handleTransfer(
   const occurredAtMs = asFiniteNumber(event.event_timestamp_ms)
   const occurredAt = occurredAtMs !== null ? new Date(occurredAtMs) : new Date()
 
-  const from = Array.isArray(event.transferred_from)
-    ? event.transferred_from.filter(
-        (uid): uid is string => typeof uid === 'string' && uid !== ''
-      )
-    : []
+  // ドキュメント ID にできない値は書き込み時に throw する。500 で返すと
+  // RevenueCat が再送し続けるので、ここで落としてログだけ残す
+  const pickUids = (value: unknown, field: string): string[] => {
+    if (!Array.isArray(value)) return []
 
-  const to = Array.isArray(event.transferred_to)
-    ? event.transferred_to.filter(
-        (uid): uid is string => typeof uid === 'string' && uid !== ''
-      )
-    : []
+    return value.filter((uid): uid is string => {
+      if (typeof uid !== 'string' || uid === '') return false
+
+      if (!isValidDocumentId(uid)) {
+        console.error(
+          `Ignored an invalid app_user_id in RevenueCat TRANSFER ${field}: ${uid}`
+        )
+        return false
+      }
+
+      return true
+    })
+  }
+
+  const from = pickUids(event.transferred_from, 'transferred_from')
+  const to = pickUids(event.transferred_to, 'transferred_to')
 
   const fetchSubscriber = config.revenuecat?.fetchSubscriber
 
@@ -100,11 +151,15 @@ async function handleTransfer(
     )
   }
 
+  let effectsPending = false
+
   try {
     for (const uid of from) {
-      await applySubscriptionEvent(config, {
-        // uid ごとに別イベントとして記録する（同じキーだと 2 件目が duplicate になる）
-        eventId: `${eventId}:from:${uid}`,
+      const result = await applySubscriptionEvent(config, {
+        // uid ごとに別イベントとして記録する（同じキーだと 2 件目が duplicate になる）。
+        // uid をそのまま繋ぐと、記録先のドキュメント ID が 1500 バイトを超えて
+        // doc() が throw しうるため、固定長のハッシュにする
+        eventId: `${eventId}:from:${shortUid(uid)}`,
         source: 'revenuecat',
         uid,
         occurredAt,
@@ -113,6 +168,8 @@ async function handleTransfer(
           source: 'revenuecat',
         },
       })
+
+      if (result.effectsPending) effectsPending = true
     }
 
     // 移動先の権利を取り直す。取得に失敗しても移動元の失効は確定させたいので、
@@ -130,14 +187,16 @@ async function handleTransfer(
             continue
           }
 
-          await applySubscriptionEvent(config, {
-            eventId: `${eventId}:to:${uid}`,
+          const result = await applySubscriptionEvent(config, {
+            eventId: `${eventId}:to:${shortUid(uid)}`,
             source: 'revenuecat',
             uid,
             occurredAt,
             // source はフックに決めさせない（config.ts の注意書きを参照）
             subscription: { ...subscription, source: 'revenuecat' },
           })
+
+          if (result.effectsPending) effectsPending = true
         } catch (error) {
           console.error(
             `Failed to restore the transferred entitlement for ${uid}`,
@@ -149,6 +208,10 @@ async function handleTransfer(
   } catch (error) {
     console.error('Failed to process RevenueCat transfer', error)
     return { status: 500, body: { error: 'Internal error' } }
+  }
+
+  if (effectsPending) {
+    return effectsPendingResult()
   }
 
   return { status: 200, body: { received: true } }
@@ -190,6 +253,14 @@ export async function handleRevenueCatWebhook(
     event.app_user_id === ''
   ) {
     return { status: 400, body: { error: 'Invalid payload' } }
+  }
+
+  // TRANSFER は transferred_from / transferred_to の側を個別に検証する
+  if (event.type !== 'TRANSFER' && !isValidDocumentId(event.app_user_id)) {
+    console.error(
+      `Invalid RevenueCat app_user_id: ${event.app_user_id.slice(0, 100)}`
+    )
+    return { status: 400, body: { error: 'Invalid app_user_id' } }
   }
 
   // TestFlight / 開発ビルドが本番の Webhook URL を叩くと、サンドボックス購入で
@@ -247,6 +318,10 @@ export async function handleRevenueCatWebhook(
 
     if (result.status !== 'applied') {
       console.log(`RevenueCat event ${eventId} skipped: ${result.status}`)
+    }
+
+    if (result.effectsPending) {
+      return effectsPendingResult()
     }
   } catch (error) {
     console.error('Failed to process RevenueCat webhook', error)

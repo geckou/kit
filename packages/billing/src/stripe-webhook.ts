@@ -92,6 +92,10 @@ export async function handleStripeWebhook(
 
   const occurredAt = new Date(event.created * 1000)
 
+  // 反映は済んだが副作用（クレーム同期・権利変化フック）が残っている状態。
+  // 200 を返すと Stripe は配信成功と見なして再送しない = 二度と実行されない
+  let effectsPending = false
+
   try {
     switch (event.type) {
       // 決済完了。以降 顧客ポータルを開けるよう顧客 ID を保存する
@@ -159,6 +163,8 @@ export async function handleStripeWebhook(
         if (result.status !== 'applied') {
           console.log(`Stripe event ${event.id} skipped: ${result.status}`)
         }
+
+        effectsPending = result.effectsPending
         break
       }
 
@@ -168,6 +174,16 @@ export async function handleStripeWebhook(
   } catch (error) {
     console.error('Failed to process Stripe webhook', error)
     return { status: 500, body: { error: 'Internal error' } }
+  }
+
+  if (effectsPending) {
+    // 権利状態そのものは書き込み済みなので、再送は duplicate として扱われ、
+    // 失敗した副作用だけがやり直される
+    console.error(
+      `Stripe event ${event.id} applied but its post-apply effects failed; asking for a retry`
+    )
+
+    return { status: 503, body: { error: 'Effects pending' } }
   }
 
   return { status: 200, body: { received: true } }

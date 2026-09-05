@@ -57,6 +57,9 @@ export function mapRevenueCatStatus(type: string): SubscriptionStatus | null {
     case 'UNCANCELLATION':
     case 'PRODUCT_CHANGE':
     case 'NON_RENEWING_PURCHASE':
+    case 'SUBSCRIPTION_EXTENDED':
+      // SUBSCRIPTION_EXTENDED は開発者・ストアによる期間の延長。
+      // 無視すると currentPeriodEnd が古いままになり、延長分が反映されない
       return 'active'
 
     // 自動更新を止めただけ。expiration_at_ms までは利用できる
