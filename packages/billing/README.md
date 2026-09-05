@@ -109,6 +109,11 @@ revenuecat: {
 `users/{app_user_id}` で、`Purchases.logIn(uid)` していない匿名 ID のままだと
 `users/$RCAnonymousID:...` が作られ、そのユーザーの権利はどこからも参照されない。
 
+`app_user_id` はクライアントが自由に決められる値なので、Firestore の
+ドキュメント ID にできない値（`/` を含む・`.` / `..`・`__x__` の形・1500 バイト超）は
+**400 で弾く**。そのまま `doc()` に渡すと同期 throw して 500 になり、
+RevenueCat が再送を繰り返すため。
+
 ### Checkout とプラン変更
 
 `createCheckoutSession` は **新規契約のみ**を扱う。既に有効な購読を持つユーザーには
@@ -154,7 +159,11 @@ import type { Subscription } from '@geckou/billing/entitlement'
 有効で、かつイベントの経路が違う場合、次のどれかを満たさないと適用しない。
 
 - 反映後も有効で、`currentPeriodEnd` が今より後ろへ伸びる
-- 反映後も有効で、今は期限を持つがイベント側は期限を持たない（無期限とみなす）
+- イベント側が `active` で期限を持たず（買い切り等の無期限）、今の権利は期限を持つ
+
+期限を持たない `in_grace_period` / `cancelled` は「無期限」ではなく、単に期限
+フィールドが欠けているだけの可能性がある。これを最強として扱うと、期限を持たない
+`BILLING_ISSUE` が生きている権利のスロットを奪い、直後の `EXPIRATION` で権利が消える。
 
 日時と `sequence` だけで前後を決めると、次の 2 通りで生きている権利が消える。
 
@@ -164,6 +173,19 @@ import type { Subscription } from '@geckou/billing/entitlement'
 
 無視したイベントは `applied: false` で記録し、警告をログに出す
 （`ApplyResult.status` は `'ignored'`）。
+
+### 反映後の副作用と再送
+
+カスタムクレームの同期と権利変化フック（`onSubscriptionUpgraded` /
+`onSubscriptionDowngraded`）は、Firestore への反映が確定した後に実行する。
+ここで失敗しても Webhook は 200 を返すが、**失敗した種類を
+`billing_events/{id}.failedEffects` に残し、同じイベントが再送されたときに
+それだけをやり直す**（`ApplyResult.status` は `'duplicate'` のまま）。
+成功済みのフックは二度呼ばれない。
+
+現在の `subscription.lastEventId` がそのイベントでなくなっている場合
+（後続のイベントが既にスロットを上書きしている場合）はやり直さず、完了として記録する。
+古い状態でクレームを書き戻さないため。
 
 **同じ経路の遷移は従来どおり全て適用する。** 経路ごとに権利を保持して OR を取る形には
 していない（`Subscription` の形が変わるため）。両経路の購入を UI から防ぎたい場合は、

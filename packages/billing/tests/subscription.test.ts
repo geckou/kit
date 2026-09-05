@@ -387,6 +387,58 @@ describe('applySubscriptionEvent', () => {
 
   // 回帰: 別経路の「まだ有効」がスロットを奪い、その後で同一経路の失効が通ると、
   // 生きている Stripe の権利が消えていた（ガードが「有効 → 無効」しか見ていなかった）
+  // 回帰: 期限を持たない in_grace_period が「無期限で最強」と誤判定され、
+  // 生きている権利のスロットを奪い、直後の同一経路の失効で権利が消えていた
+  it('期限を持たない猶予期間の権利ではスロットを奪わせない', async () => {
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_stripe_active',
+        source: 'stripe' as const,
+        occurredAt: new Date('2026-08-01T00:00:00Z'),
+        subscription: {
+          status: 'active' as const,
+          source: 'stripe' as const,
+          currentPeriodEnd: new Date('2099-01-01T00:00:00Z'),
+        },
+      })
+    )
+
+    const grace = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_billing_issue',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-02T00:00:00Z'),
+        subscription: {
+          status: 'in_grace_period' as const,
+          source: 'revenuecat' as const,
+        },
+      })
+    )
+
+    expect(grace.status).toBe('ignored')
+
+    const expiration = await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_rc_expiration',
+        source: 'revenuecat' as const,
+        occurredAt: new Date('2026-08-03T00:00:00Z'),
+        subscription: {
+          status: 'expired' as const,
+          source: 'revenuecat' as const,
+        },
+      })
+    )
+
+    expect(expiration.status).toBe('ignored')
+    expect(readSubscription('user-1')).toMatchObject({
+      status: 'active',
+      source: 'stripe',
+    })
+  })
+
   it('別経路の弱い（期限が手前の）権利でスロットを奪わせない', async () => {
     await applySubscriptionEvent(
       config,
@@ -664,6 +716,92 @@ describe('権利変化の副作用', () => {
     expect(fakeAuth.setCustomUserClaims).not.toHaveBeenCalled()
     expect(mockOnUpgraded).not.toHaveBeenCalled()
     expect(mockOnDowngraded).not.toHaveBeenCalled()
+  })
+
+  it('副作用が失敗したままなら、同じイベントの再送でやり直す', async () => {
+    fakeAuth.getUser.mockRejectedValue(new Error('auth down'))
+
+    await applySubscriptionEvent(config, createEvent())
+    expect(fakeAuth.setCustomUserClaims).not.toHaveBeenCalled()
+
+    // 復旧後の再送。duplicate だが副作用は未完了なので実行し直す
+    fakeAuth.getUser.mockResolvedValue({ customClaims: undefined })
+
+    const result = await applySubscriptionEvent(config, createEvent())
+
+    expect(result.status).toBe('duplicate')
+    expect(fakeAuth.setCustomUserClaims).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ subscriptionActive: true })
+    )
+    // 成功していたフックは二度呼ばない
+    expect(mockOnUpgraded).toHaveBeenCalledTimes(1)
+  })
+
+  it('失敗したフックだけを再送でやり直す（クレーム同期は二度実行しない）', async () => {
+    mockOnUpgraded.mockRejectedValue(new Error('cleanup failed'))
+
+    await applySubscriptionEvent(config, createEvent())
+    expect(fakeAuth.setCustomUserClaims).toHaveBeenCalledTimes(1)
+
+    mockOnUpgraded.mockResolvedValue(undefined)
+    vi.clearAllMocks()
+    fakeAuth.getUser.mockResolvedValue({ customClaims: undefined })
+
+    await applySubscriptionEvent(config, createEvent())
+
+    expect(mockOnUpgraded).toHaveBeenCalledTimes(1)
+    expect(fakeAuth.setCustomUserClaims).not.toHaveBeenCalled()
+  })
+
+  it('この仕組みより前に記録されたイベント（フラグ無し）の再送では副作用を走らせない', async () => {
+    await applySubscriptionEvent(config, createEvent())
+
+    const eventDoc = store.get('billing_events/stripe_evt_1') as Record<
+      string,
+      unknown
+    >
+    delete eventDoc.effectsCompleted
+    delete eventDoc.failedEffects
+    vi.clearAllMocks()
+
+    await applySubscriptionEvent(config, createEvent())
+
+    expect(fakeAuth.setCustomUserClaims).not.toHaveBeenCalled()
+    expect(mockOnUpgraded).not.toHaveBeenCalled()
+  })
+
+  it('副作用が完了していれば、再送でやり直さない', async () => {
+    await applySubscriptionEvent(config, createEvent())
+    vi.clearAllMocks()
+
+    await applySubscriptionEvent(config, createEvent())
+
+    expect(fakeAuth.setCustomUserClaims).not.toHaveBeenCalled()
+    expect(mockOnUpgraded).not.toHaveBeenCalled()
+  })
+
+  it('後続のイベントが上書き済みなら、古いイベントの再送で権利を書き戻さない', async () => {
+    fakeAuth.getUser.mockRejectedValue(new Error('auth down'))
+    await applySubscriptionEvent(config, createEvent())
+
+    fakeAuth.getUser.mockResolvedValue({ customClaims: undefined })
+    await applySubscriptionEvent(
+      config,
+      createEvent({
+        eventId: 'evt_2',
+        occurredAt: new Date('2026-08-02T00:00:00Z'),
+        subscription: { status: 'expired', source: 'stripe' },
+      })
+    )
+    vi.clearAllMocks()
+
+    // 古い evt_1 の再送。今の権利（expired）を active で上書きしてはいけない
+    await applySubscriptionEvent(config, createEvent())
+
+    expect(fakeAuth.setCustomUserClaims).not.toHaveBeenCalled()
+    expect(mockOnUpgraded).not.toHaveBeenCalled()
+    expect(readSubscription('user-1').status).toBe('expired')
   })
 
   it('クレーム同期が失敗しても反映は成功扱いにする', async () => {
