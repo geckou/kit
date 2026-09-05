@@ -178,18 +178,40 @@ import type { Subscription } from '@geckou/billing/entitlement'
 
 カスタムクレームの同期と権利変化フック（`onSubscriptionUpgraded` /
 `onSubscriptionDowngraded`）は、Firestore への反映が確定した後に実行する。
-ここで失敗しても Webhook は 200 を返すが、**失敗した種類を
-`billing_events/{id}.failedEffects` に残し、同じイベントが再送されたときに
-それだけをやり直す**（`ApplyResult.status` は `'duplicate'` のまま）。
+ここで失敗した場合は **`ApplyResult.effectsPending` が true になり、Webhook ハンドラは
+503 を返す**。200 を返すとプロバイダは配信成功と見なして再送せず、失敗した副作用が
+二度と実行されないため。権利状態そのものは書き込み済みなので、再送は `'duplicate'`
+として扱われ、**失敗した種類（`billing_events/{id}.failedEffects`）だけがやり直される**。
 成功済みのフックは二度呼ばれない。
+
+再送の判定に使う遷移（`wasActive` / `isActive`）は初回適用時の値をイベント側に残して使う。
+現在の状態から計算し直すと、期限付きの権利が切れた後の再送で「無効 → 無効」に見え、
+失敗したままのフックが呼ばれない。
+
+同じイベントが**並行して**届く場合に備えて、副作用の実行権（`effectsClaimedAt`、60 秒）を
+トランザクションの中で取る。先に取った側だけが実行し、実行中にプロセスが落ちても
+期限切れで次の再送が引き継ぐ。
 
 現在の `subscription.lastEventId` がそのイベントでなくなっている場合
 （後続のイベントが既にスロットを上書きしている場合）はやり直さず、完了として記録する。
 古い状態でクレームを書き戻さないため。
 
+> フックが恒久的に失敗する（実装のバグ等）と、プロバイダの再送が続く。
+> ログ（`post-apply effects failed`）を監視して、原因側を直すこと。
+
 **同じ経路の遷移は従来どおり全て適用する。** 経路ごとに権利を保持して OR を取る形には
 していない（`Subscription` の形が変わるため）。両経路の購入を UI から防ぎたい場合は、
 IAP の購入画面側でも権利を確認すること。
+
+### 0.6.0 の変更
+
+- `ApplyResult` に `effectsPending` が増えた。反映後の副作用が失敗したことを表す
+  （Webhook ハンドラはこれを見て 503 を返す）。`ApplyResult` を自分で組み立てている
+  コードは追従が要る
+- 副作用の再実行に実行権（`billing_events/{id}.effectsClaimedAt`）を使う
+- `TRANSFER` の派生イベント ID が `<eventId>:from:<app_user_id のハッシュ>` になった
+  （長い `app_user_id` でドキュメント ID の上限を超えないようにするため）。
+  この変更より前に処理した TRANSFER は、再送されると 1 度だけ再適用されうる
 
 ### 0.3.0 の破壊的変更
 

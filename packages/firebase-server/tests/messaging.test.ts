@@ -164,7 +164,11 @@ describe('sendPushNotificationBatch', () => {
     // 失敗したチャンクの 500 件 + 1 件目の個別失敗
     expect(result.failureCount).toBe(501)
     expect(result.invalidTokens).toEqual(['token-499'])
-    expect(result.errors).toEqual([failure])
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0].error).toBe(failure)
+    // 失敗したチャンクのトークンだけを再送できる
+    expect(result.errors[0].tokens).toHaveLength(500)
+    expect(result.errors[0].tokens[0]).toBe('token-500')
 
     errorSpy.mockRestore()
   })

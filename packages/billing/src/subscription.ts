@@ -14,6 +14,15 @@ function omitUndefined<T extends Record<string, unknown>>(value: T): T {
 }
 
 /**
+ * 副作用（クレーム同期・権利変化フック）の実行権の有効時間。
+ *
+ * 同じイベントが並行して届くと、両方が「副作用が未完了」を見て同じフックを
+ * 二度呼びうる。トランザクションの中で実行権を取り、この時間内は他を通さない。
+ * 実行中にプロセスが落ちても、期限が切れれば次の再送が引き継げる
+ */
+const EFFECTS_LEASE_MS = 60_000
+
+/**
  * 別経路（Stripe ↔ RevenueCat）のイベントで、生きているスロットを奪ってよいか。
  *
  * users/{uid}.subscription は 1 スロットしかなく、両方の経路で購入されると
@@ -115,26 +124,50 @@ export async function applySubscriptionEvent(
         // 副作用の成否が分からないので、再実行はしない
         eventSnapshot.get('effectsCompleted') === false
       ) {
-        if (current !== undefined && current.lastEventId === event.eventId) {
-          pendingEffects = {
-            subscription: current,
-            result: {
-              status: 'applied',
-              wasActive: eventSnapshot.get('wasActive') === true,
-              isActive: wasActive,
-            },
-            // 失敗したものだけをやり直す（成功済みのフックを二度呼ばない）
-            only: toEffectNames(eventSnapshot.get('failedEffects')),
+        // 並行して届いた再送が同じフックを二度呼ばないよう、実行権を取る。
+        // トランザクションの中で見るので、先に取った側だけが通る
+        const claimedAt = toDate(eventSnapshot.get('effectsClaimedAt'))
+        const claimIsLive =
+          claimedAt !== null &&
+          Date.now() - claimedAt.getTime() < EFFECTS_LEASE_MS
+
+        if (!claimIsLive) {
+          if (current !== undefined && current.lastEventId === event.eventId) {
+            pendingEffects = {
+              subscription: current,
+              result: {
+                status: 'applied',
+                // 初回適用時の遷移をそのまま使う。ここで計算し直すと、
+                // 期限付きの権利が切れた後の再送で「無効 → 無効」に見え、
+                // 失敗したままの upgrade / downgrade フックが呼ばれない
+                wasActive: eventSnapshot.get('wasActive') === true,
+                isActive: eventSnapshot.get('isActive') === true,
+                effectsPending: false,
+              },
+              // 失敗したものだけをやり直す（成功済みのフックを二度呼ばない）
+              only: toEffectNames(eventSnapshot.get('failedEffects')),
+            }
+          } else {
+            // 後続のイベントが既にスロットを上書きしている。古い状態で
+            // クレームを書き戻さない（後続イベントの副作用は、そのイベント
+            // 自身の effectsCompleted で追跡される）
+            effectsSuperseded = true
           }
-        } else {
-          // 後続のイベントが既にスロットを上書きしている。古い状態で
-          // クレームを書き戻さない（後続イベントの副作用は、そのイベント
-          // 自身の effectsCompleted で追跡される）
-          effectsSuperseded = true
+
+          transaction.set(
+            eventRef,
+            { effectsClaimedAt: new Date() },
+            { merge: true }
+          )
         }
       }
 
-      return { status: 'duplicate', wasActive, isActive: wasActive }
+      return {
+        status: 'duplicate',
+        wasActive,
+        isActive: wasActive,
+        effectsPending: false,
+      }
     }
 
     const lastEventAt = toDate(current?.lastEventAt)
@@ -188,6 +221,8 @@ export async function applySubscriptionEvent(
     const skip = isStale || crossSourceBlocked
 
     // 適用しない場合でもイベント自体は記録して、再送のたびに読み直さないようにする
+    const nextIsActive = isSubscriptionActive(next)
+
     transaction.set(eventRef, {
       source: event.source,
       eventId: event.eventId,
@@ -198,7 +233,11 @@ export async function applySubscriptionEvent(
       // 再送で拾い直すため、完了したかどうかをイベント側に残す
       // （適用しないイベントには副作用が無いので完了扱い）
       effectsCompleted: skip,
+      // 実行権。これから副作用を実行する間、並行する再送を通さない
+      effectsClaimedAt: skip ? null : new Date(),
+      // 再送で副作用をやり直すときに使う、初回適用時の遷移
       wasActive,
+      isActive: skip ? wasActive : nextIsActive,
       processedAt: new Date(),
     })
 
@@ -207,6 +246,7 @@ export async function applySubscriptionEvent(
         status: crossSourceBlocked ? 'ignored' : 'stale',
         wasActive,
         isActive: wasActive,
+        effectsPending: false,
       }
     }
 
@@ -223,7 +263,8 @@ export async function applySubscriptionEvent(
     return {
       status: 'applied',
       wasActive,
-      isActive: isSubscriptionActive(next),
+      isActive: nextIsActive,
+      effectsPending: false,
     }
   })
 
@@ -234,9 +275,12 @@ export async function applySubscriptionEvent(
     )
   }
 
+  let effectsPending = false
+
   if (result.status === 'applied') {
     const failed = await runPostApplyEffects(config, event.uid, next, result)
     await recordEffectsResult(eventRef, failed)
+    effectsPending = failed.length > 0
   } else if (pendingEffects !== null) {
     const retried: {
       subscription: Subscription
@@ -251,11 +295,15 @@ export async function applySubscriptionEvent(
       retried.only
     )
     await recordEffectsResult(eventRef, failed)
+    effectsPending = failed.length > 0
   } else if (effectsSuperseded) {
     await recordEffectsResult(eventRef, [])
   }
 
-  return result
+  // 副作用が未完了のまま 200 を返すと、プロバイダは配信成功と見なして
+  // 再送しない = 二度と実行されない。呼び出し側（Webhook ハンドラ）が
+  // 5xx を返せるように伝える
+  return { ...result, effectsPending }
 }
 
 /** 副作用の種類。失敗したものだけを再送でやり直すために名前で持つ */
@@ -288,7 +336,12 @@ async function recordEffectsResult(
 ): Promise<void> {
   try {
     await eventRef.set(
-      { effectsCompleted: failed.length === 0, failedEffects: failed },
+      {
+        effectsCompleted: failed.length === 0,
+        failedEffects: failed,
+        // 実行権を返す。失敗した場合も次の再送がすぐ引き継げるようにする
+        effectsClaimedAt: null,
+      },
       { merge: true }
     )
   } catch (error) {

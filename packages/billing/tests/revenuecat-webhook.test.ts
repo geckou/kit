@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // applySubscriptionEvent の戻り値は ApplyResult（実装と同じ形にしておく）
-const mockApplySubscriptionEvent = vi
-  .fn()
-  .mockResolvedValue({ status: 'applied', wasActive: false, isActive: true })
+const mockApplySubscriptionEvent = vi.fn().mockResolvedValue({
+  status: 'applied',
+  wasActive: false,
+  isActive: true,
+  effectsPending: false,
+})
 
 vi.mock('../src/subscription.js', () => ({
   applySubscriptionEvent: (...args: unknown[]) =>
@@ -65,6 +68,7 @@ describe('RevenueCat Webhook', () => {
       status: 'applied',
       wasActive: false,
       isActive: true,
+      effectsPending: false,
     })
   })
 
@@ -209,6 +213,50 @@ describe('RevenueCat Webhook', () => {
     )
 
     errorSpy.mockRestore()
+  })
+
+  // 回帰: 副作用が失敗したまま 200 を返すと、RevenueCat は配信成功と見なして
+  // 再送しないため、失敗した副作用が二度と実行されない
+  it('副作用が未完了なら 5xx を返して再送させる', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockApplySubscriptionEvent.mockResolvedValueOnce({
+      status: 'applied',
+      wasActive: false,
+      isActive: true,
+      effectsPending: true,
+    })
+
+    const result = await handleRevenueCatWebhook(
+      createConfig(),
+      createRequest(createEventBody('RENEWAL', 'user-1'), authed)
+    )
+
+    expect(result.status).toBe(503)
+
+    errorSpy.mockRestore()
+  })
+
+  it('長い app_user_id でも派生イベント ID が固定長に収まる', async () => {
+    const longUid = 'u'.repeat(1400)
+
+    await handleRevenueCatWebhook(
+      createConfig(),
+      createRequest(
+        createEventBody('TRANSFER', 'anonymous', {
+          transferred_from: [longUid],
+          transferred_to: [],
+        }),
+        authed
+      )
+    )
+
+    const { eventId } = mockApplySubscriptionEvent.mock.calls[0][1] as {
+      eventId: string
+    }
+
+    // billing_events のドキュメント ID は `<source>_<eventId>`。1500 バイトを
+    // 超えると doc() が throw して 500 の再送ループになる
+    expect(Buffer.byteLength(`revenuecat_${eventId}`)).toBeLessThan(1500)
   })
 
   it('CANCELLATION は cancelled（期間終了までは有効）として反映する', async () => {

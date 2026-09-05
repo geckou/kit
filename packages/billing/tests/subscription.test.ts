@@ -754,6 +754,70 @@ describe('権利変化の副作用', () => {
     expect(fakeAuth.setCustomUserClaims).not.toHaveBeenCalled()
   })
 
+  it('副作用が未完了なら effectsPending を返す（Webhook に再送させるため）', async () => {
+    fakeAuth.getUser.mockRejectedValue(new Error('auth down'))
+
+    const result = await applySubscriptionEvent(config, createEvent())
+
+    expect(result.status).toBe('applied')
+    expect(result.effectsPending).toBe(true)
+
+    // 復旧後の再送で完了すれば false に戻る
+    fakeAuth.getUser.mockResolvedValue({ customClaims: undefined })
+    const retried = await applySubscriptionEvent(config, createEvent())
+
+    expect(retried.status).toBe('duplicate')
+    expect(retried.effectsPending).toBe(false)
+  })
+
+  it('実行権が生きている間は、並行して届いた再送で副作用を走らせない', async () => {
+    fakeAuth.getUser.mockRejectedValue(new Error('auth down'))
+    await applySubscriptionEvent(config, createEvent())
+
+    // 先に届いた再送が副作用を実行中（実行権を取得したまま）の状態を作る
+    const eventDoc = store.get('billing_events/stripe_evt_1') as Record<
+      string,
+      unknown
+    >
+    eventDoc.effectsClaimedAt = new Date()
+
+    fakeAuth.getUser.mockResolvedValue({ customClaims: undefined })
+    vi.clearAllMocks()
+
+    await applySubscriptionEvent(config, createEvent())
+
+    expect(fakeAuth.setCustomUserClaims).not.toHaveBeenCalled()
+  })
+
+  it('再送のフックは初回適用時の遷移で判断する（期限切れ後でも呼ぶ）', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T00:00:00Z'))
+
+    mockOnUpgraded.mockRejectedValue(new Error('cleanup failed'))
+
+    const event = createEvent({
+      subscription: {
+        status: 'cancelled' as const,
+        source: 'stripe' as const,
+        currentPeriodEnd: new Date('2026-08-15T00:00:00Z'),
+      },
+    })
+
+    await applySubscriptionEvent(config, event)
+    expect(mockOnUpgraded).toHaveBeenCalledTimes(1)
+
+    // 期間が終わった後に再送される。現在時刻で判定し直すと「無効 → 無効」に
+    // 見えてしまい、失敗したままのフックが二度と呼ばれない
+    vi.setSystemTime(new Date('2026-09-01T00:00:00Z'))
+    mockOnUpgraded.mockResolvedValue(undefined)
+
+    await applySubscriptionEvent(config, event)
+
+    expect(mockOnUpgraded).toHaveBeenCalledTimes(2)
+
+    vi.useRealTimers()
+  })
+
   it('この仕組みより前に記録されたイベント（フラグ無し）の再送では副作用を走らせない', async () => {
     await applySubscriptionEvent(config, createEvent())
 

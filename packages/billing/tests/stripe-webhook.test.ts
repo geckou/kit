@@ -2,9 +2,12 @@ import type Stripe from 'stripe'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // applySubscriptionEvent の戻り値は ApplyResult（実装と同じ形にしておく）
-const mockApplySubscriptionEvent = vi
-  .fn()
-  .mockResolvedValue({ status: 'applied', wasActive: false, isActive: true })
+const mockApplySubscriptionEvent = vi.fn().mockResolvedValue({
+  status: 'applied',
+  wasActive: false,
+  isActive: true,
+  effectsPending: false,
+})
 const mockSaveStripeCustomerId = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('../src/subscription.js', () => ({
@@ -80,6 +83,7 @@ describe('Stripe Webhook', () => {
       status: 'applied',
       wasActive: false,
       isActive: true,
+      effectsPending: false,
     })
   })
 
@@ -359,6 +363,27 @@ describe('Stripe Webhook', () => {
 
     expect(result.status).toBe(200)
     expect(mockApplySubscriptionEvent).not.toHaveBeenCalled()
+  })
+
+  // 回帰: 副作用が失敗したまま 200 を返すと、Stripe は配信成功と見なして
+  // 再送しないため、失敗した副作用が二度と実行されない
+  it('副作用が未完了なら 5xx を返して再送させる', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockConstructEvent.mockReturnValue(
+      createSubscriptionEvent('customer.subscription.updated')
+    )
+    mockApplySubscriptionEvent.mockResolvedValue({
+      status: 'applied',
+      wasActive: false,
+      isActive: true,
+      effectsPending: true,
+    })
+
+    const result = await handleStripeWebhook(createConfig(), createRequest())
+
+    expect(result.status).toBe(503)
+
+    errorSpy.mockRestore()
   })
 
   it('Firestore エラー時に 500 を返す', async () => {

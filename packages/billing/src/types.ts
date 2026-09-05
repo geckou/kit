@@ -78,6 +78,12 @@ export type ApplyResult = {
   wasActive: boolean
   /** 適用後に権利が有効か（適用しなかった場合は wasActive と同じ） */
   isActive: boolean
+  /**
+   * 反映後の副作用（クレーム同期・権利変化フック）が未完了か。
+   * true なら Webhook ハンドラは 5xx を返し、プロバイダに再送させる
+   * （再送時は失敗した副作用だけをやり直す）
+   */
+  effectsPending: boolean
 }
 
 /**

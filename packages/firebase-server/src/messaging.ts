@@ -48,10 +48,12 @@ export type BatchPushResult = {
   /** 保存先から削除すべきトークン（恒久的に失敗したもの） */
   invalidTokens: string[]
   /**
-   * 送信そのものが失敗した分割チャンクのエラー。
-   * 空でなければ、そのチャンクのトークンは結果に反映されていない
+   * 送信そのものが失敗した分割チャンク。
+   * 空でなければ、そのチャンクのトークンは 1 件も送られていない。
+   * 再試行するときは `tokens` だけを送り直す（全件を送り直すと、
+   * 成功済みのトークンに通知が二重に届く）
    */
-  errors: unknown[]
+  errors: { error: unknown; tokens: string[] }[]
 }
 
 /**
@@ -126,7 +128,7 @@ export async function sendPushNotificationBatch(
       })
     } catch (error) {
       result.failureCount += tokens.length
-      result.errors.push(error)
+      result.errors.push({ error, tokens })
       console.error(
         `Failed to send a push notification chunk (${tokens.length} tokens)`,
         error

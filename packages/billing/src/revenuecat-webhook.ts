@@ -44,6 +44,29 @@ function isValidDocumentId(id: string): boolean {
   )
 }
 
+/**
+ * 派生イベント ID に混ぜるための固定長の識別子。
+ * app_user_id は 1500 バイトまで許されるので、そのまま繋ぐと記録先の
+ * ドキュメント ID が上限を超える
+ */
+function shortUid(uid: string): string {
+  return crypto.createHash('sha256').update(uid).digest('hex').slice(0, 16)
+}
+
+/**
+ * 反映は済んだが副作用（クレーム同期・権利変化フック）が残っている状態。
+ * 200 を返すと再送されず二度と実行されないため、あえて 5xx を返す
+ * （権利状態そのものは書き込み済みなので、再送は duplicate として扱われ、
+ *  失敗した副作用だけがやり直される）
+ */
+function effectsPendingResult(): HttpResult {
+  console.error(
+    'RevenueCat event applied but its post-apply effects failed; asking for a retry'
+  )
+
+  return { status: 503, body: { error: 'Effects pending' } }
+}
+
 /** 有限な数値のみ受け取る（NaN・文字列・undefined は null にする） */
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -128,11 +151,15 @@ async function handleTransfer(
     )
   }
 
+  let effectsPending = false
+
   try {
     for (const uid of from) {
-      await applySubscriptionEvent(config, {
-        // uid ごとに別イベントとして記録する（同じキーだと 2 件目が duplicate になる）
-        eventId: `${eventId}:from:${uid}`,
+      const result = await applySubscriptionEvent(config, {
+        // uid ごとに別イベントとして記録する（同じキーだと 2 件目が duplicate になる）。
+        // uid をそのまま繋ぐと、記録先のドキュメント ID が 1500 バイトを超えて
+        // doc() が throw しうるため、固定長のハッシュにする
+        eventId: `${eventId}:from:${shortUid(uid)}`,
         source: 'revenuecat',
         uid,
         occurredAt,
@@ -141,6 +168,8 @@ async function handleTransfer(
           source: 'revenuecat',
         },
       })
+
+      if (result.effectsPending) effectsPending = true
     }
 
     // 移動先の権利を取り直す。取得に失敗しても移動元の失効は確定させたいので、
@@ -158,14 +187,16 @@ async function handleTransfer(
             continue
           }
 
-          await applySubscriptionEvent(config, {
-            eventId: `${eventId}:to:${uid}`,
+          const result = await applySubscriptionEvent(config, {
+            eventId: `${eventId}:to:${shortUid(uid)}`,
             source: 'revenuecat',
             uid,
             occurredAt,
             // source はフックに決めさせない（config.ts の注意書きを参照）
             subscription: { ...subscription, source: 'revenuecat' },
           })
+
+          if (result.effectsPending) effectsPending = true
         } catch (error) {
           console.error(
             `Failed to restore the transferred entitlement for ${uid}`,
@@ -177,6 +208,10 @@ async function handleTransfer(
   } catch (error) {
     console.error('Failed to process RevenueCat transfer', error)
     return { status: 500, body: { error: 'Internal error' } }
+  }
+
+  if (effectsPending) {
+    return effectsPendingResult()
   }
 
   return { status: 200, body: { received: true } }
@@ -283,6 +318,10 @@ export async function handleRevenueCatWebhook(
 
     if (result.status !== 'applied') {
       console.log(`RevenueCat event ${eventId} skipped: ${result.status}`)
+    }
+
+    if (result.effectsPending) {
+      return effectsPendingResult()
     }
   } catch (error) {
     console.error('Failed to process RevenueCat webhook', error)

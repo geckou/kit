@@ -91,10 +91,10 @@ FCM は 1 リクエストにつき 500 件までのため、`sendPushNotificatio
 500 件ずつに分割して送り、件数を合算して返す（呼び出し側で分ける必要はない）。
 
 分割したチャンクの送信そのものが失敗しても throw せず、そのチャンクの件数を
-`failureCount` に計上し、エラーを `errors` に入れて返す。途中で throw すると、
+`failureCount` に計上し、`{ error, tokens }` を `errors` に入れて返す。途中で throw すると、
 それ以前のチャンクで判明した `invalidTokens` を呼び出し側が掃除できず、
-次回も同じ失敗を繰り返すため。`errors` が空でなければ、そのチャンク分は
-未送信として扱うこと。
+次回も同じ失敗を繰り返すため。**再試行するときは `errors[].tokens` だけを送り直す**
+（全件を送り直すと、成功済みのトークンに通知が二重に届く）。
 
 モバイル側の受信（権限リクエスト・トークン取得）はこのパッケージの対象外。
 テンプレートの `apps/mobile/src/lib/push-notifications.ts`（expo-notifications）が担当する。
