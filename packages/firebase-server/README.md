@@ -76,7 +76,7 @@ await sendPushNotification(getMessaging(), fcmToken, {
 })
 
 // 複数デバイス（トークンが空配列なら送信せず 0 件で返る）
-const { successCount, failureCount, invalidTokens } =
+const { successCount, failureCount, invalidTokens, errors } =
   await sendPushNotificationBatch(getMessaging(), fcmTokens, {
     title: 'お知らせ',
     body: '本文',
@@ -89,6 +89,12 @@ await removeFcmTokens(invalidTokens)
 
 FCM は 1 リクエストにつき 500 件までのため、`sendPushNotificationBatch` は
 500 件ずつに分割して送り、件数を合算して返す（呼び出し側で分ける必要はない）。
+
+分割したチャンクの送信そのものが失敗しても throw せず、そのチャンクの件数を
+`failureCount` に計上し、エラーを `errors` に入れて返す。途中で throw すると、
+それ以前のチャンクで判明した `invalidTokens` を呼び出し側が掃除できず、
+次回も同じ失敗を繰り返すため。`errors` が空でなければ、そのチャンク分は
+未送信として扱うこと。
 
 モバイル側の受信（権限リクエスト・トークン取得）はこのパッケージの対象外。
 テンプレートの `apps/mobile/src/lib/push-notifications.ts`（expo-notifications）が担当する。

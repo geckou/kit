@@ -72,6 +72,7 @@ describe('sendPushNotificationBatch', () => {
       successCount: 2,
       failureCount: 1,
       invalidTokens: [],
+      errors: [],
     })
   })
 
@@ -83,6 +84,7 @@ describe('sendPushNotificationBatch', () => {
       successCount: 0,
       failureCount: 0,
       invalidTokens: [],
+      errors: [],
     })
   })
 
@@ -103,6 +105,7 @@ describe('sendPushNotificationBatch', () => {
       successCount: 501,
       failureCount: 0,
       invalidTokens: [],
+      errors: [],
     })
   })
 
@@ -130,5 +133,39 @@ describe('sendPushNotificationBatch', () => {
 
     // 一時的なエラー（internal-error）は削除対象にしない
     expect(result.invalidTokens).toEqual(['token-2'])
+  })
+
+  // 回帰: 途中のチャンクが throw すると、それ以前の成功数と invalidTokens が
+  // 呼び出し側に返らず、無効トークンを掃除できないまま次回も同じ失敗を繰り返していた
+  it('途中のチャンクが失敗しても、それ以外の結果を返す', async () => {
+    const tokens = Array.from({ length: 1001 }, (_, i) => `token-${i}`)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failure = new Error('FCM unavailable')
+
+    sendEachForMulticast
+      .mockResolvedValueOnce({
+        successCount: 499,
+        failureCount: 1,
+        responses: [
+          ...Array.from({ length: 499 }, () => ({ success: true })),
+          {
+            success: false,
+            error: { code: 'messaging/registration-token-not-registered' },
+          },
+        ],
+      })
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({ successCount: 1, failureCount: 0 })
+
+    const result = await sendPushNotificationBatch(messaging, tokens, payload)
+
+    expect(sendEachForMulticast).toHaveBeenCalledTimes(3)
+    expect(result.successCount).toBe(500)
+    // 失敗したチャンクの 500 件 + 1 件目の個別失敗
+    expect(result.failureCount).toBe(501)
+    expect(result.invalidTokens).toEqual(['token-499'])
+    expect(result.errors).toEqual([failure])
+
+    errorSpy.mockRestore()
   })
 })
