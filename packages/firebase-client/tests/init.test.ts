@@ -128,7 +128,7 @@ describe('initFirebase の食い違い警告', () => {
   })
 
   // 回帰: 最初の呼び出しが createAuth 無しだと、その後 createAuth 付きで
-  // 呼んでも永続化なしの Auth が返り続ける（React Native で気付きにくい）
+  // 呼んでも createAuth は実行されない（React Native で気付きにくい）
   it('createAuth 無しで初期化済みのアプリに createAuth を渡すと警告する', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const first = initFirebase(config)

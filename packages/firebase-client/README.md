@@ -55,7 +55,7 @@ initFirebase(config, (app) =>
 | 警告 | 意味 |
 | --- | --- |
 | 既存アプリの `projectId` が `config.projectId` と違う | 渡した設定は適用されていない（テストで別プロジェクトを初期化済み、複数プロジェクト構成） |
-| `createAuth` 無しで初期化済みのアプリに `createAuth` を渡した | 永続化なしの Auth が返っている。`createAuth` を渡す呼び出しを最初に実行すること |
+| このモジュールが `createAuth` を実行した記録が無いアプリに `createAuth` を渡した | 今回の `createAuth` は呼ばれず `getAuth` の Auth が返る。意図した永続化が効いていない可能性がある（`createAuth` を渡す呼び出しを最初に実行すること）。Fast Refresh でモジュールだけ作り直された場合など、既存 Auth が実際には永続化付きのこともある |
 
 ## Firestore
 

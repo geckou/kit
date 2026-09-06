@@ -7,11 +7,16 @@ import type { FirebaseApp } from 'firebase/app'
 import type { Auth } from 'firebase/auth'
 
 /**
- * createAuth を使って Auth を生成した app。
+ * このモジュールインスタンスが createAuth で Auth を生成した app。
  *
- * 2 回目以降の呼び出しで「永続化付きのつもりが getAuth の Auth が返っている」
- * 食い違いを検知するためだけに持つ。app に紐付けるので、
- * テストで app を作り直せば記録も一緒に消える
+ * 2 回目以降の呼び出しで「createAuth を渡したのに呼ばれない」ことを
+ * 知らせるためだけに持つ。app に紐付けるので、テストで app を作り直せば
+ * 記録も一緒に消える。
+ *
+ * この Set に無いことから言えるのは「このモジュールが createAuth を
+ * 実行した記録が無い」ことだけで、既存 Auth の永続化状態は分からない
+ * （Fast Refresh でモジュールだけ作り直された場合や、利用側が別経路で
+ * initializeAuth 済みの場合がある）
  */
 const appsWithCustomAuth = new WeakSet<FirebaseApp>()
 
@@ -47,8 +52,9 @@ export function initFirebase(
 
     if (createAuth && !appsWithCustomAuth.has(existingApp)) {
       console.warn(
-        'initFirebase: 初期化済みのアプリを再利用したため createAuth は呼ばれず、' +
-          'getAuth の Auth が返る（永続化なし）。createAuth を渡す呼び出しを最初に実行すること'
+        'initFirebase: 初期化済みのアプリを再利用したため、今回渡した createAuth は呼ばれず ' +
+          'getAuth の Auth が返る。意図した永続化が効いていない可能性があるので、' +
+          'createAuth を渡す呼び出しを最初に実行すること'
       )
     }
   }
