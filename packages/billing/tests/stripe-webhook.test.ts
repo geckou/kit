@@ -56,6 +56,7 @@ function createSubscriptionEvent(
     id: 'evt_test',
     type,
     created: 1_754_000_000,
+    livemode: true,
     data: {
       object: {
         id: 'sub_test',
@@ -332,6 +333,7 @@ describe('Stripe Webhook', () => {
       id: 'evt_checkout',
       type: 'checkout.session.completed',
       created: 1_754_000_000,
+      livemode: true,
       data: {
         object: {
           id: 'cs_test',
@@ -356,6 +358,7 @@ describe('Stripe Webhook', () => {
       id: 'evt_other',
       type: 'invoice.created',
       created: 1_754_000_000,
+      livemode: true,
       data: { object: {} },
     })
 
@@ -395,5 +398,88 @@ describe('Stripe Webhook', () => {
     const result = await handleStripeWebhook(createConfig(), createRequest())
 
     expect(result.status).toBe(500)
+  })
+})
+
+// 回帰: RevenueCat 側には SANDBOX ガードがあるのに Stripe 側に対応する
+// livemode の検査が無く、テスト用の Webhook シークレットを本番の Functions に
+// 配線するとテストモードの購入で本番の権利が付いていた
+describe('Stripe Webhook のテストモード', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockApplySubscriptionEvent.mockResolvedValue({
+      status: 'applied',
+      wasActive: false,
+      isActive: true,
+      effectsPending: false,
+    })
+  })
+
+  function createTestModeEvent() {
+    const event = createSubscriptionEvent('customer.subscription.updated')
+
+    return { ...event, livemode: false }
+  }
+
+  it('livemode: false のイベントは既定では適用せず 200 を返す', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    mockConstructEvent.mockReturnValue(createTestModeEvent())
+
+    const result = await handleStripeWebhook(createConfig(), createRequest())
+
+    expect(result.status).toBe(200)
+    expect(mockApplySubscriptionEvent).not.toHaveBeenCalled()
+    expect(String(logSpy.mock.calls[0]?.[0])).toContain('test-mode')
+
+    logSpy.mockRestore()
+  })
+
+  it('allowTestMode: true なら livemode: false でも適用する', async () => {
+    mockConstructEvent.mockReturnValue(createTestModeEvent())
+
+    const result = await handleStripeWebhook(
+      createConfig({ allowTestMode: true }),
+      createRequest()
+    )
+
+    expect(result.status).toBe(200)
+    expect(mockApplySubscriptionEvent).toHaveBeenCalled()
+  })
+
+  it('livemode: true のイベントは allowTestMode に関わらず適用する', async () => {
+    mockConstructEvent.mockReturnValue(
+      createSubscriptionEvent('customer.subscription.updated')
+    )
+
+    const result = await handleStripeWebhook(createConfig(), createRequest())
+
+    expect(result.status).toBe(200)
+    expect(mockApplySubscriptionEvent).toHaveBeenCalled()
+  })
+
+  // checkout.session.completed は顧客 ID の保存だけだが、テストモードの
+  // 顧客 ID を本番のユーザーに書き込むと以後ポータルが開けなくなる
+  it('livemode: false の checkout.session.completed も無視する', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_checkout',
+      type: 'checkout.session.completed',
+      created: 1_754_000_000,
+      livemode: false,
+      data: {
+        object: {
+          id: 'cs_test',
+          client_reference_id: 'user-1',
+          customer: 'cus_test',
+        },
+      },
+    })
+
+    const result = await handleStripeWebhook(createConfig(), createRequest())
+
+    expect(result.status).toBe(200)
+    expect(mockSaveStripeCustomerId).not.toHaveBeenCalled()
+
+    logSpy.mockRestore()
   })
 })

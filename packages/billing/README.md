@@ -22,6 +22,8 @@ const billing = createBilling({
     successUrl: process.env.STRIPE_SUCCESS_URL,
     cancelUrl: process.env.STRIPE_CANCEL_URL,
     portalReturnUrl: process.env.STRIPE_PORTAL_RETURN_URL,
+    // develop 環境の Functions でのみ true にする（既定 false）
+    allowTestMode: process.env.STRIPE_ALLOW_TEST_MODE === 'true',
   },
   revenuecat: {
     webhookAuth: process.env.REVENUECAT_WEBHOOK_AUTH!,
@@ -74,6 +76,16 @@ export async function POST(req: Request) {
   return Response.json(result.body, { status: result.status })
 }
 ```
+
+### Stripe のテストモード
+
+Webhook の `event.livemode` が `false` のイベントは、既定では**適用せず 200 を返す**。
+テスト用の Webhook シークレットを本番の Functions に配線してしまったときに、
+テストモードの購入で本番の権利が付くのを防ぐため（RevenueCat の `allowSandbox` と対称）。
+テストモードの Stripe を叩く開発環境では `allowTestMode: true` にする。
+
+400 ではなく 200 を返すのは、400 だと Stripe が再送し続けるため。無視したことは
+`console.log` に残る。
 
 ### RevenueCat の環境
 

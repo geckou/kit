@@ -90,6 +90,14 @@ export async function handleStripeWebhook(
     return { status: 400, body: { error: 'Invalid signature' } }
   }
 
+  // テスト用の Webhook シークレットを本番の Functions に配線すると、テストモードの
+  // 購入で本番の権利が付く。RevenueCat の SANDBOX ガードと同じく、既定では適用せず
+  // ログだけ残す（400 にすると Stripe が再送し続けるので 200 を返す）
+  if (!event.livemode && config.stripe.allowTestMode !== true) {
+    console.log(`Ignored Stripe test-mode event: ${event.type} (${event.id})`)
+    return { status: 200, body: { received: true } }
+  }
+
   const occurredAt = new Date(event.created * 1000)
 
   // 反映は済んだが副作用（クレーム同期・権利変化フック）が残っている状態。
