@@ -186,6 +186,132 @@ function collectFiles(root, extension) {
   return files.sort()
 }
 
+/**
+ * 型定義の比較用に正規化する。
+ *
+ * 落とすもの: コメントと、コード部分の空白の差。
+ * `declaration: true` なので src のコメント修正はそのまま `.d.ts` に出る。
+ * 生テキストで比べると docs 相当の修正を patch で出すたびに publish が赤くなり、
+ * `--force` を常用する習慣ができて、本来の目的（破壊的変更の検知）が働かなくなる。
+ *
+ * 落とさないもの:
+ * - 文字列・テンプレートリテラルの中身（`'https://a'` の `//` はコメントではないし、
+ *   リテラル型 `'a b'` → `'a  b'` は公開 API の変更）
+ * - `/// <reference ... />`（トリプルスラッシュ・ディレクティブ）。`//` で始まるが
+ *   コメントではなく型解決の指示で、消えれば利用側がグローバル型を失う破壊的変更になる
+ */
+function normalizeTypes(source) {
+  const parts = []
+  let index = 0
+  let pendingSpace = false
+
+  const isWordCharacter = (char) =>
+    char !== undefined && /[A-Za-z0-9_$]/.test(char)
+
+  // コード部分を書く。直前に空白があったときは、**単語同士を繋げてしまう場合だけ**
+  // 空白 1 個に畳んで残す。`f( a : string )` と `f(a:string)` のような整形の差は
+  // API の差ではないので消し、`ab` と `a b` の差は残す
+  const write = (text) => {
+    if (pendingSpace) {
+      const previous =
+        parts.length > 0 ? parts[parts.length - 1].slice(-1) : undefined
+
+      if (isWordCharacter(previous) && isWordCharacter(text[0])) parts.push(' ')
+      pendingSpace = false
+    }
+
+    parts.push(text)
+  }
+
+  // 行頭（空白のみが先行する位置）かどうか。/// の判定に使う
+  const atLineStart = () => {
+    for (let back = index - 1; back >= 0; back -= 1) {
+      const char = source[back]
+      if (char === '\n') return true
+      if (char !== ' ' && char !== '\t' && char !== '\r') return false
+    }
+
+    return true
+  }
+
+  while (index < source.length) {
+    const char = source[index]
+    const next = source[index + 1]
+
+    if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
+      pendingSpace = true
+      index += 1
+      continue
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      const quote = char
+      let literal = char
+      index += 1
+
+      while (index < source.length) {
+        if (source[index] === '\\') {
+          literal += source[index] + (source[index + 1] ?? '')
+          index += 2
+          continue
+        }
+
+        const closed = source[index] === quote
+        literal += source[index]
+        index += 1
+        if (closed) break
+      }
+
+      write(literal)
+      continue
+    }
+
+    // /// <reference ... /> は行ごと残す（コメントではなく型解決の指示）
+    if (
+      char === '/' &&
+      next === '/' &&
+      source[index + 2] === '/' &&
+      atLineStart()
+    ) {
+      let directive = ''
+
+      while (index < source.length && source[index] !== '\n') {
+        directive += source[index]
+        index += 1
+      }
+
+      write(directive.trimEnd())
+      continue
+    }
+
+    if (char === '/' && next === '/') {
+      while (index < source.length && source[index] !== '\n') index += 1
+      pendingSpace = true
+      continue
+    }
+
+    if (char === '/' && next === '*') {
+      index += 2
+
+      while (
+        index < source.length &&
+        !(source[index] === '*' && source[index + 1] === '/')
+      ) {
+        index += 1
+      }
+
+      index += 2
+      pendingSpace = true
+      continue
+    }
+
+    write(char)
+    index += 1
+  }
+
+  return parts.join('')
+}
+
 function diffTrees(before, after, extension) {
   const beforeFiles = collectFiles(before, extension)
   const afterFiles = collectFiles(after, extension)
@@ -203,6 +329,17 @@ function diffTrees(before, after, extension) {
       : null
 
     if (beforeContent === afterContent) continue
+
+    // .d.ts はコメントと空白を落として比べる（両方が存在するときだけ。
+    // 追加・削除はそれ自体が API の変化なので正規化しても消えない）
+    if (
+      extension === '.d.ts' &&
+      beforeContent !== null &&
+      afterContent !== null &&
+      normalizeTypes(beforeContent) === normalizeTypes(afterContent)
+    ) {
+      continue
+    }
 
     changed.push({
       file,

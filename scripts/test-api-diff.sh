@@ -11,6 +11,10 @@ set -u
 #   1. 型定義に差分が無ければ通す
 #   2. 型定義が変わっていれば止めて、差分を表示する
 #   3. エクスポートの追加も差分として検出する（互換の追加かは人が判断する）
+#   3b. コメント・空白だけの変更は差分として扱わない
+#   3c. ただし文字列リテラル中の `//` はコメントではないので落とさない
+#   3d. リテラル内部の空白は潰さない（'a b' → 'a  b' は公開型の変更）
+#   3e. /// <reference /> はコメントではないので落とさない
 #   4. 型定義を持たないパッケージは止めず、内容が変わっていることを警告する
 #   5. ビルドできない環境では止めない（検査できないだけ）
 #   6. tarball を展開できないときは止めない
@@ -163,6 +167,83 @@ if [ "$status" -ne 0 ]; then
   pass "追加も差分として止める（互換かは人が判断する）"
 else
   fail "追加を見逃した" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[3b] コメントだけの変更"
+work=$(mktemp -d)
+make_package "$work" '/** 古い説明 */
+export declare const demo: number'
+published=$(pack_published "$work")
+# declaration: true なので src のコメント修正はそのまま .d.ts に出る。
+# 生テキストで比べると docs 相当の patch を出すたびに publish が赤くなり、
+# --force を常用する習慣ができて破壊的変更の検知が働かなくなる
+printf '// 別の書き方のコメント\n/** 新しい説明 */\nexport declare const demo: number\n' \
+  > "$work/packages/demo/dist/index.d.ts"
+output=$(check "$work" "$published")
+status=$?
+
+if [ "$status" -eq 0 ] && printf '%s' "$output" | grep -q '差分はありません'; then
+  pass "コメントだけの差分は通す"
+else
+  fail "コメントだけの差分で止めた（status=$status）" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[3c] 文字列リテラルの中の // は落とさない"
+work=$(mktemp -d)
+make_package "$work" "export declare const url: 'https://example.com/a'"
+published=$(pack_published "$work")
+printf "export declare const url: 'https://example.com/b'\n" \
+  > "$work/packages/demo/dist/index.d.ts"
+output=$(check "$work" "$published")
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  pass "URL を含むリテラル型の変更は止める"
+else
+  fail "コメント除去が文字列を壊して差分を消した" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[3d] リテラル内部の空白は API の差として扱う"
+work=$(mktemp -d)
+make_package "$work" "export declare const label: 'a b'"
+published=$(pack_published "$work")
+# 正規化がリテラルの中まで潰すと、公開されている型の変更を見逃す
+printf "export declare const label: 'a  b'\n" > "$work/packages/demo/dist/index.d.ts"
+output=$(check "$work" "$published")
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  pass "リテラル型の空白の変更は止める"
+else
+  fail "正規化がリテラル内部まで潰して差分を消した" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[3e] トリプルスラッシュ・ディレクティブ"
+work=$(mktemp -d)
+make_package "$work" '/// <reference types="node" />
+export declare const demo: number'
+published=$(pack_published "$work")
+# /// は // で始まるがコメントではない。消えると利用側がグローバル型を失う
+printf 'export declare const demo: number\n' > "$work/packages/demo/dist/index.d.ts"
+output=$(check "$work" "$published")
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  pass "reference ディレクティブの消失は止める"
+else
+  fail "ディレクティブをコメントとして落とした" "$output"
 fi
 
 rm -rf "$work"
