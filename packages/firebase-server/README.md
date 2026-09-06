@@ -36,14 +36,25 @@ export const requireFreshAuth = createRequireAuth(getAuth, {
 ```
 
 ```ts
+import type { AuthenticatedRequest } from '@geckou/firebase-server'
 import type { Request } from 'express'
 
 app.get('/me', requireAuth, (req, res) => {
-  // 検証に成功すると req.uid に uid が入る
-  const { uid } = req as Request & { uid: string }
-  res.json({ uid })
+  // 検証に成功すると req.uid に uid、req.token に検証済みトークン全体が入る
+  const { uid, token } = req as Request & AuthenticatedRequest
+  res.json({ uid, plan: token.plan })
 })
 ```
+
+`req.token` は `verifyIdToken` の戻り値そのもの。`@geckou/billing` の `syncClaims` が書く
+`subscriptionActive` / `plan` や `role` などのカスタムクレームは全てここに載るので、
+ハンドラ側で再度 `verifyIdToken` を呼んだり Firestore を読んだりする必要はない。
+型は `{ uid: string } & Record<string, unknown>`（`DecodedTokenLike`）なので、
+`uid` 以外は利用側で絞り込むこと。
+
+`TokenVerifierLike` が要求する戻り値は `{ uid: string }` のまま（最小契約）。
+`DecodedTokenLike` を要求すると、`uid` を持つ interface / class を返す独自 verifier が
+インデックスシグネチャ不足で代入できなくなるため。
 
 `Authorization: Bearer <ID トークン>` を検証し、トークンが無い・不正な場合は
 `401 { "error": "Unauthorized" }` を返してハンドラへ進まない。
