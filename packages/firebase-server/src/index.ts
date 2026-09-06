@@ -1,5 +1,7 @@
 export {
   createRequireAuth,
+  type AuthenticatedRequest,
+  type DecodedTokenLike,
   type NextLike,
   type RequestLike,
   type ResponseLike,

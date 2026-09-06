@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createRequireAuth,
+  type AuthenticatedRequest,
   type RequestLike,
   type ResponseLike,
 } from '../src/auth-middleware'
@@ -81,9 +82,43 @@ describe('createRequireAuth', () => {
     await requireAuth(req, res, next)
 
     expect(verifyIdToken).toHaveBeenCalledWith('valid-token', false)
-    expect((req as RequestLike & { uid: string }).uid).toBe('user-1')
+    expect((req as AuthenticatedRequest).uid).toBe('user-1')
     expect(next).toHaveBeenCalled()
     expect(res.statusCode).toBe(0)
+  })
+
+  // 回帰: decoded から uid だけ取り出していたため、@geckou/billing の
+  // syncClaims が書く subscriptionActive / plan や role をハンドラで使うには
+  // verifyIdToken をもう一度呼ぶか Firestore を読む必要があった
+  it('検証済みトークン全体を req.token に載せる', async () => {
+    const decoded = {
+      uid: 'user-1',
+      subscriptionActive: true,
+      plan: 'pro',
+      role: 'admin',
+    }
+    verifyIdToken.mockResolvedValueOnce(decoded)
+
+    const req = createRequest('Bearer valid-token')
+    const next = vi.fn()
+
+    await requireAuth(req, createResponse(), next)
+
+    expect((req as AuthenticatedRequest).token).toEqual(decoded)
+    expect((req as AuthenticatedRequest).token.subscriptionActive).toBe(true)
+    expect(next).toHaveBeenCalled()
+  })
+
+  it('検証に失敗したときは req.token を載せない', async () => {
+    verifyIdToken.mockRejectedValueOnce(new Error('invalid'))
+
+    const req = createRequest('Bearer invalid-token')
+    const res = createResponse()
+
+    await requireAuth(req, res, vi.fn())
+
+    expect((req as Partial<AuthenticatedRequest>).token).toBeUndefined()
+    expect(res.statusCode).toBe(401)
   })
 
   // 回帰: next() を try の中で呼んでいたため、後続ハンドラの同期例外が
@@ -118,7 +153,7 @@ describe('createRequireAuth', () => {
     await middleware(req, createResponse(), vi.fn())
 
     expect(getVerifier).toHaveBeenCalledTimes(1)
-    expect((req as RequestLike & { uid: string }).uid).toBe('user-2')
+    expect((req as AuthenticatedRequest).uid).toBe('user-2')
   })
 })
 
