@@ -49,6 +49,14 @@ initFirebase(config, (app) =>
 `getReactNativePersistence()` は呼ぶたびに別のクラスを返すため、再度 `initializeAuth` を
 呼ぶと `auth/already-initialized` で落ちる（Fast Refresh や複数モジュールからの呼び出し）。
 
+再利用のため、**2 回目以降に渡した `config` と `createAuth` は効かない**。黙って別プロジェクトへ
+読み書きするのを避けるため、次の 2 つは `console.warn` で知らせる。
+
+| 警告 | 意味 |
+| --- | --- |
+| 既存アプリの `projectId` が `config.projectId` と違う | 渡した設定は適用されていない（テストで別プロジェクトを初期化済み、複数プロジェクト構成） |
+| このモジュールが `createAuth` を実行した記録が無いアプリに `createAuth` を渡した | 今回の `createAuth` は呼ばれず `getAuth` の Auth が返る。意図した永続化が効いていない可能性がある（`createAuth` を渡す呼び出しを最初に実行すること）。Fast Refresh でモジュールだけ作り直された場合など、既存 Auth が実際には永続化付きのこともある |
+
 ## Firestore
 
 コレクション名は引数で受け取る。1つの Firebase プロジェクトに複数環境を相乗りさせていて
