@@ -17,11 +17,14 @@
  */
 export type DecodedTokenLike = { uid: string } & Record<string, unknown>
 
+/**
+ * 戻り値は `{ uid: string }` だけを要求する（最小契約）。
+ * `DecodedTokenLike` を要求すると、`uid` を持つ interface / class を返す
+ * 独自 verifier がインデックスシグネチャ不足で代入できなくなるため
+ * （型レベルの破壊的変更になる）
+ */
 export type TokenVerifierLike = {
-  verifyIdToken(
-    token: string,
-    checkRevoked?: boolean
-  ): Promise<DecodedTokenLike>
+  verifyIdToken(token: string, checkRevoked?: boolean): Promise<{ uid: string }>
 }
 
 /** requireAuth を通過した後のリクエスト。ハンドラ側でのキャストに使う */
@@ -84,7 +87,7 @@ export function createRequireAuth(
     // resolveAuth() も try の外で呼ぶ。中に入れると、App 未初期化などの
     // 設定ミスが「トークンが無効」と区別できない 401 に化ける
     const verifier = resolveAuth()
-    let decoded: DecodedTokenLike
+    let decoded: { uid: string }
 
     try {
       decoded = await verifier.verifyIdToken(token, checkRevoked)
@@ -97,8 +100,9 @@ export function createRequireAuth(
 
     authenticated.uid = decoded.uid
     // カスタムクレームを捨てると、ハンドラ側は verifyIdToken をもう一度呼ぶか
-    // Firestore を読むしかない。検証済みの中身をそのまま渡す
-    authenticated.token = decoded
+    // Firestore を読むしかない。検証済みの中身をそのまま渡す。
+    // 型は最小契約の { uid } だが、firebase-admin が返す実体はクレームを含む
+    authenticated.token = decoded as DecodedTokenLike
 
     next()
   }

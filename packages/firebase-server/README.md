@@ -52,6 +52,10 @@ app.get('/me', requireAuth, (req, res) => {
 型は `{ uid: string } & Record<string, unknown>`（`DecodedTokenLike`）なので、
 `uid` 以外は利用側で絞り込むこと。
 
+`TokenVerifierLike` が要求する戻り値は `{ uid: string }` のまま（最小契約）。
+`DecodedTokenLike` を要求すると、`uid` を持つ interface / class を返す独自 verifier が
+インデックスシグネチャ不足で代入できなくなるため。
+
 `Authorization: Bearer <ID トークン>` を検証し、トークンが無い・不正な場合は
 `401 { "error": "Unauthorized" }` を返してハンドラへ進まない。
 

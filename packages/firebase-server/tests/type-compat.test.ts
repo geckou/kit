@@ -19,6 +19,18 @@ import type { MessagingLike } from '../src/messaging'
 const _auth: TokenVerifierLike = undefined as unknown as Auth
 const _messaging: MessagingLike = undefined as unknown as Messaging
 const _middleware: RequestHandler = createRequireAuth(_auth)
+
+// 回帰: 戻り値に Record<string, unknown> を要求すると、uid を持つ
+// interface / class を返す独自 verifier が代入できなくなる
+interface MinimalDecoded {
+  uid: string
+}
+class CustomVerifier {
+  async verifyIdToken(_token: string, _checkRevoked?: boolean) {
+    return { uid: 'user-1' } as MinimalDecoded
+  }
+}
+const _customVerifier: TokenVerifierLike = new CustomVerifier()
 // firebase-admin の DecodedIdToken をそのまま req.token に載せられること
 const _decoded: DecodedTokenLike = undefined as unknown as DecodedIdToken
 // Express の Request をハンドラ側でキャストできること
@@ -26,6 +38,7 @@ const _authenticated: AuthenticatedRequest = undefined as unknown as Request &
   AuthenticatedRequest
 
 void _auth
+void _customVerifier
 void _messaging
 void _middleware
 void _decoded
