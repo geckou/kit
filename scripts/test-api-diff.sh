@@ -15,6 +15,10 @@ set -u
 #   3c. ただし文字列リテラル中の `//` はコメントではないので落とさない
 #   3d. リテラル内部の空白は潰さない（'a b' → 'a  b' は公開型の変更）
 #   3e. /// <reference /> はコメントではないので落とさない
+#   3f. 単語境界は Unicode で見る（interface Ω と interfaceΩ を混同しない）
+#   3g. テンプレート型の ${ } の中はコードとして正規化する
+#   3h. テンプレート型の文字部分は公開された型なので保つ
+#   3i. ディレクティブでない /// はただのコメントとして落とす
 #   4. 型定義を持たないパッケージは止めず、内容が変わっていることを警告する
 #   5. ビルドできない環境では止めない（検査できないだけ）
 #   6. tarball を展開できないときは止めない
@@ -244,6 +248,83 @@ if [ "$status" -ne 0 ]; then
   pass "reference ディレクティブの消失は止める"
 else
   fail "ディレクティブをコメントとして落とした" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[3f] Unicode の識別子境界"
+work=$(mktemp -d)
+make_package "$work" 'export interface Foo {}'
+published=$(pack_published "$work")
+# ASCII だけで単語境界を見ると `interface Ω` と `interfaceΩ` が同じに畳まれ、
+# 型の追加・削除を patch で見逃す（TypeScript の識別子は ASCII に限らない）
+printf 'export interface \u03a9 {}\n' > "$work/packages/demo/dist/index.d.ts"
+output=$(check "$work" "$published")
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  pass "Unicode 識別子への変更を止める"
+else
+  fail "識別子の境界が畳まれて差分が消えた" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[3g] テンプレートリテラル型の補間"
+work=$(mktemp -d)
+make_package "$work" 'export type Key = `${/* 旧 */ string}-${number}`'
+published=$(pack_published "$work")
+# ${ } の中は型（＝コード）なので、コメントと整形の差は通す
+printf 'export type Key = `${ /* 新 */ string }-${ number }`\n' \
+  > "$work/packages/demo/dist/index.d.ts"
+output=$(check "$work" "$published")
+status=$?
+
+if [ "$status" -eq 0 ] && printf '%s' "$output" | grep -q '差分はありません'; then
+  pass "補間の中のコメント・空白は通す"
+else
+  fail "補間の中がコードとして正規化されていない（status=$status）" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[3h] テンプレートリテラル型の文字部分"
+work=$(mktemp -d)
+make_package "$work" 'export type Key = `${string}-${number}`'
+published=$(pack_published "$work")
+# 区切り文字は公開された型そのもの
+printf 'export type Key = `${string}_${number}`\n' \
+  > "$work/packages/demo/dist/index.d.ts"
+output=$(check "$work" "$published")
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  pass "文字部分の変更は止める"
+else
+  fail "テンプレートの文字部分まで正規化された" "$output"
+fi
+
+rm -rf "$work"
+echo ""
+
+echo "[3i] ディレクティブでないトリプルスラッシュ"
+work=$(mktemp -d)
+make_package "$work" '/// 古い説明
+export declare const demo: number'
+published=$(pack_published "$work")
+# /// でも <reference> 等でなければただのコメント。残すと docs 相当の patch が止まる
+printf '/// 新しい説明\nexport declare const demo: number\n' \
+  > "$work/packages/demo/dist/index.d.ts"
+output=$(check "$work" "$published")
+status=$?
+
+if [ "$status" -eq 0 ] && printf '%s' "$output" | grep -q '差分はありません'; then
+  pass "ディレクティブでない /// は通す"
+else
+  fail "ただの /// コメントで止めた（status=$status）" "$output"
 fi
 
 rm -rf "$work"

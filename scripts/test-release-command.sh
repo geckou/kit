@@ -18,8 +18,10 @@ set -u
 #   8. 消えたリポジトリの登録は無視する。worktree（.git がファイル）は無視しない。
 #      末尾に改行が無い最終行も読む
 #   9. レジストリが無い / パッケージ未指定 / 不正な形式の名前は止める
+#  10. release.sh の作業ツリー検査（本物の release.sh を使う唯一の節）
 #
-# 実際のタグ打ちは行わない。release.sh は引数を書き出すだけのものに差し替える。
+# 1〜9 で実際のタグ打ちは行わない。release.sh は引数を書き出すだけのものに差し替える。
+# 10 だけは検査そのものが対象なので、本物の release.sh を一時リポジトリで走らせる。
 
 cd "$(dirname "$0")/.."
 REPO_ROOT=$(pwd)
@@ -238,6 +240,58 @@ for invalid in '../../etc' 'Foo' 'a_b' ''; do
     fail "不正な名前は止まる: [$invalid]" "$output"
   fi
 done
+
+# --- 10. release.sh の作業ツリー検査 -----------------------------------
+#
+# 未追跡ファイルは公開物にもタグの内容にも影響しないので通す。追跡ファイルの
+# 変更は止める。上の 1〜9 は release.sh をスタブに差し替えているため、この
+# 検査だけはここで本物を走らせる。
+#
+# 作業ツリーの検査は「production ブランチか」より手前にあるので、通ったときは
+# 別のメッセージ（ブランチ違い）で止まる。それを「通過した」の判定に使う。
+echo ""
+echo "=== release.sh の作業ツリー検査 ==="
+
+worktree_check() {
+  local dir
+  dir=$(mktemp -d)
+
+  mkdir -p "$dir/scripts" "$dir/packages/core"
+  cp "$REPO_ROOT/scripts/release.sh" "$dir/scripts/release.sh"
+  printf '{ "name": "@geckou/core", "version": "0.1.0" }\n' \
+    > "$dir/packages/core/package.json"
+
+  git -C "$dir" init -q
+  git -C "$dir" -c user.email=test@example.com -c user.name=test \
+    add -A > /dev/null
+  git -C "$dir" -c user.email=test@example.com -c user.name=test \
+    commit -q -m 'chore: init'
+
+  # $1: 事前に作る状態（untracked / modified / clean）
+  case "$1" in
+    untracked) printf 'SECRET=x\n' > "$dir/.env" ;;
+    modified) printf 'changed\n' >> "$dir/packages/core/package.json" ;;
+  esac
+
+  (cd "$dir" && bash scripts/release.sh core 2>&1)
+  rm -rf "$dir"
+}
+
+output=$(worktree_check untracked)
+
+if printf '%s' "$output" | grep -q 'コミットされていない変更があります'; then
+  fail "未追跡ファイルだけならリリースを止めない" "$output"
+else
+  pass "未追跡ファイルだけならリリースを止めない"
+fi
+
+output=$(worktree_check modified)
+
+if printf '%s' "$output" | grep -q 'コミットされていない変更があります'; then
+  pass "追跡ファイルの変更は止める"
+else
+  fail "追跡ファイルの変更を通した" "$output"
+fi
 
 echo ""
 echo "成功 $passed / 失敗 $failed"

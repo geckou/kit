@@ -195,23 +195,30 @@ function collectFiles(root, extension) {
  * `--force` を常用する習慣ができて、本来の目的（破壊的変更の検知）が働かなくなる。
  *
  * 落とさないもの:
- * - 文字列・テンプレートリテラルの中身（`'https://a'` の `//` はコメントではないし、
- *   リテラル型 `'a b'` → `'a  b'` は公開 API の変更）
- * - `/// <reference ... />`（トリプルスラッシュ・ディレクティブ）。`//` で始まるが
- *   コメントではなく型解決の指示で、消えれば利用側がグローバル型を失う破壊的変更になる
+ * - 文字列・テンプレートリテラルの**文字の部分**（`'https://a'` の `//` はコメントでは
+ *   ないし、リテラル型 `'a b'` → `'a  b'` は公開 API の変更）。
+ *   テンプレートの `${ ... }` の中は型なので、そこはコードとして正規化する
+ * - `/// <reference ... />` 等のディレクティブ。`//` で始まるがコメントではなく
+ *   型解決の指示で、消えれば利用側がグローバル型を失う破壊的変更になる。
+ *   ディレクティブでない `/// ただの説明` は普通の行コメントとして落とす
  */
 function normalizeTypes(source) {
   const parts = []
   let index = 0
   let pendingSpace = false
 
+  // TypeScript の識別子は ASCII に限らない（`interface Ω {}` は正当）。
+  // ASCII だけで境界を見ると `interface Ω` と `interfaceΩ` が同じに畳まれ、
+  // 型の追加・削除を見逃す
   const isWordCharacter = (char) =>
-    char !== undefined && /[A-Za-z0-9_$]/.test(char)
+    char !== undefined && /[\p{ID_Continue}$]/u.test(char)
 
   // コード部分を書く。直前に空白があったときは、**単語同士を繋げてしまう場合だけ**
   // 空白 1 個に畳んで残す。`f( a : string )` と `f(a:string)` のような整形の差は
   // API の差ではないので消し、`ab` と `a b` の差は残す
   const write = (text) => {
+    if (text === '') return
+
     if (pendingSpace) {
       const previous =
         parts.length > 0 ? parts[parts.length - 1].slice(-1) : undefined
@@ -223,7 +230,7 @@ function normalizeTypes(source) {
     parts.push(text)
   }
 
-  // 行頭（空白のみが先行する位置）かどうか。/// の判定に使う
+  // 行頭（空白のみが先行する位置）かどうか。ディレクティブの判定に使う
   const atLineStart = () => {
     for (let back = index - 1; back >= 0; back -= 1) {
       const char = source[back]
@@ -234,80 +241,150 @@ function normalizeTypes(source) {
     return true
   }
 
-  while (index < source.length) {
-    const char = source[index]
-    const next = source[index + 1]
+  // 意味を持つトリプルスラッシュ（TypeScript が解釈するもの）だけを残す
+  const DIRECTIVE = /^\/\/\/\s*<(reference|amd-module|amd-dependency)\b/
 
-    if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
-      pendingSpace = true
+  function scanString(quote) {
+    let literal = quote
+    index += 1
+
+    while (index < source.length) {
+      if (source[index] === '\\') {
+        literal += source[index] + (source[index + 1] ?? '')
+        index += 2
+        continue
+      }
+
+      const closed = source[index] === quote
+      literal += source[index]
       index += 1
-      continue
+      if (closed) break
     }
 
-    if (char === '"' || char === "'" || char === '`') {
-      const quote = char
-      let literal = char
-      index += 1
+    write(literal)
+  }
 
-      while (index < source.length) {
-        if (source[index] === '\\') {
-          literal += source[index] + (source[index + 1] ?? '')
-          index += 2
-          continue
+  // テンプレートリテラル。文字の部分は逐語、`${ ... }` の中はコードとして扱う。
+  // 中に入れ子のテンプレートが来ても、コード側の走査がそれを拾う
+  function scanTemplate() {
+    write('`')
+    index += 1
+    let chunk = ''
+
+    const flush = () => {
+      if (chunk !== '') {
+        parts.push(chunk)
+        chunk = ''
+      }
+    }
+
+    while (index < source.length) {
+      const char = source[index]
+
+      if (char === '\\') {
+        chunk += char + (source[index + 1] ?? '')
+        index += 2
+        continue
+      }
+
+      if (char === '`') {
+        chunk += char
+        index += 1
+        break
+      }
+
+      if (char === '$' && source[index + 1] === '{') {
+        flush()
+        parts.push('${')
+        index += 2
+        pendingSpace = false
+        scanCode(1)
+        parts.push('}')
+        index += 1
+        pendingSpace = false
+        continue
+      }
+
+      chunk += char
+      index += 1
+    }
+
+    flush()
+  }
+
+  /**
+   * コードとして走査する。
+   * depth 0 なら末尾まで、1 以上なら対応する `}` の手前で呼び出し元へ戻る
+   * （テンプレートの補間から呼ばれるため）
+   */
+  function scanCode(depth) {
+    while (index < source.length) {
+      const char = source[index]
+      const next = source[index + 1]
+
+      if (depth > 0) {
+        if (char === '{') {
+          depth += 1
+        } else if (char === '}') {
+          depth -= 1
+          if (depth === 0) return
+        }
+      }
+
+      if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
+        pendingSpace = true
+        index += 1
+        continue
+      }
+
+      if (char === '"' || char === "'") {
+        scanString(char)
+        continue
+      }
+
+      if (char === '`') {
+        scanTemplate()
+        continue
+      }
+
+      if (char === '/' && next === '/') {
+        const lineEnd = source.indexOf('\n', index)
+        const line = source.slice(
+          index,
+          lineEnd === -1 ? source.length : lineEnd
+        )
+
+        if (atLineStart() && DIRECTIVE.test(line)) {
+          write(line.trimEnd())
+        } else {
+          pendingSpace = true
         }
 
-        const closed = source[index] === quote
-        literal += source[index]
-        index += 1
-        if (closed) break
+        index += line.length
+        continue
       }
 
-      write(literal)
-      continue
-    }
+      if (char === '/' && next === '*') {
+        index += 2
 
-    // /// <reference ... /> は行ごと残す（コメントではなく型解決の指示）
-    if (
-      char === '/' &&
-      next === '/' &&
-      source[index + 2] === '/' &&
-      atLineStart()
-    ) {
-      let directive = ''
+        while (
+          index < source.length &&
+          !(source[index] === '*' && source[index + 1] === '/')
+        ) {
+          index += 1
+        }
 
-      while (index < source.length && source[index] !== '\n') {
-        directive += source[index]
-        index += 1
+        index += 2
+        pendingSpace = true
+        continue
       }
 
-      write(directive.trimEnd())
-      continue
+      write(char)
+      index += 1
     }
-
-    if (char === '/' && next === '/') {
-      while (index < source.length && source[index] !== '\n') index += 1
-      pendingSpace = true
-      continue
-    }
-
-    if (char === '/' && next === '*') {
-      index += 2
-
-      while (
-        index < source.length &&
-        !(source[index] === '*' && source[index + 1] === '/')
-      ) {
-        index += 1
-      }
-
-      index += 2
-      pendingSpace = true
-      continue
-    }
-
-    write(char)
-    index += 1
   }
+
+  scanCode(0)
 
   return parts.join('')
 }
