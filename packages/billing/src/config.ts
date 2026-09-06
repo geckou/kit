@@ -105,6 +105,14 @@ export type BillingConfig = {
     cancelUrl?: string
     /** カスタマーポータルからの戻り先 */
     portalReturnUrl?: string
+    /**
+     * テストモード（`event.livemode === false`）の Webhook イベントを適用するか（既定 false）。
+     *
+     * テスト用の Webhook シークレットを本番の Functions に配線してしまうと、
+     * テストモードの購入で本番の権利が付く。RevenueCat の `allowSandbox` と同じ扱いで、
+     * 既定では適用せず 200 + ログで無視する。develop 環境の Functions でのみ true にする
+     */
+    allowTestMode?: boolean
   }
 
   /** アプリ内課金（RevenueCat）を使う場合のみ設定する */
