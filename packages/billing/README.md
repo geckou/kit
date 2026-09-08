@@ -126,6 +126,35 @@ revenuecat: {
 **400 で弾く**。そのまま `doc()` に渡すと同期 throw して 500 になり、
 RevenueCat が再送を繰り返すため。
 
+### status は経路をまたいで同じ意味を持つ
+
+`SubscriptionStatus` の `cancelled` は「**自動更新が止まっている（`currentPeriodEnd`
+までは利用可）**」。Stripe と RevenueCat で状態の表し方が違うため、次のように寄せている。
+
+| 状態 | Stripe | RevenueCat | `status` |
+|---|---|---|---|
+| 有効 | `active` / `trialing` | `INITIAL_PURCHASE` 等 | `active` |
+| 自動更新を止めた（期間内は利用可） | `active` + `cancel_at_period_end: true` | `CANCELLATION` | `cancelled` |
+| 支払い失敗・猶予期間 | `past_due` | `BILLING_ISSUE` | `in_grace_period` |
+| 終了済み | `canceled` / `unpaid` | `EXPIRATION` | `expired` |
+
+⚠️ **Stripe の `canceled` と `SubscriptionStatus` の `cancelled` は別物。** Stripe は
+自動更新を止めただけの状態を `status: 'active'` のまま `cancel_at_period_end: true` で
+表し、`canceled` は既に終了した状態（`ended_at` を持つ）を指す。綴りで対応付けると、
+解約済み（期間内）の Stripe ユーザーが `active` と表示され、終了済みのユーザーが
+期間終了まで権利を持つ。
+
+そのため `mapStripeStatus` は `cancel_at_period_end` を第 2 引数で受け取る。
+
+```ts
+mapStripeStatus(subscription.status, {
+  cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+})
+```
+
+`past_due` は `cancel_at_period_end` が立っていても `in_grace_period` のまま
+（猶予期間の判定を優先する）。
+
 ### Checkout とプラン変更
 
 `createCheckoutSession` は **新規契約のみ**を扱う。既に有効な購読を持つユーザーには
@@ -214,6 +243,20 @@ import type { Subscription } from '@geckou/billing/entitlement'
 **同じ経路の遷移は従来どおり全て適用する。** 経路ごとに権利を保持して OR を取る形には
 していない（`Subscription` の形が変わるため）。両経路の購入を UI から防ぎたい場合は、
 IAP の購入画面側でも権利を確認すること。
+
+### 0.8.0 の変更（version 未反映）
+
+> `packages/billing/package.json` の version はまだ 0.7.0。上げた PR を production へ
+> マージした時点で npm に公開される（→ `.github/workflows/publish.yml`）ため、
+> リリースの判断と一緒に上げること。
+
+- `mapStripeStatus` が第 2 引数 `{ cancelAtPeriodEnd }` を受け取るようになった
+  （省略可。既存の呼び出しはそのまま動く）
+- Stripe の `canceled` が `cancelled` ではなく `expired` になった。
+  「自動更新を止めただけ」は `active` + `cancel_at_period_end: true` から
+  `cancelled` になる（→「status は経路をまたいで同じ意味を持つ」）。
+  `status === 'cancelled'` で分岐している UI・集計は、Stripe 経路の答えが変わる
+  （`isSubscriptionActive` の結果は変わらない）
 
 ### 0.6.0 の変更
 

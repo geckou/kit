@@ -140,11 +140,15 @@ export async function handleStripeWebhook(
           break
         }
 
-        // 削除イベントは Stripe 側の status に関わらず失効として扱う
+        const cancelAtPeriodEnd = subscription.cancel_at_period_end ?? false
+
+        // 削除イベントは Stripe 側の status に関わらず失効として扱う。
+        // cancel_at_period_end を渡すのは、Stripe が「自動更新だけ止めた」状態を
+        // status: 'active' のまま表すため（→ mapStripeStatus）
         const status =
           event.type === 'customer.subscription.deleted'
             ? 'expired'
-            : mapStripeStatus(subscription.status)
+            : mapStripeStatus(subscription.status, { cancelAtPeriodEnd })
 
         if (status === null) {
           console.log(
@@ -164,7 +168,7 @@ export async function handleStripeWebhook(
             source: 'stripe',
             planId: subscription.items?.data?.[0]?.price?.id,
             currentPeriodEnd: extractCurrentPeriodEnd(subscription),
-            cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+            cancelAtPeriodEnd,
           },
         })
 
