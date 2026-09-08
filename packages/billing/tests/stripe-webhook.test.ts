@@ -257,10 +257,35 @@ describe('Stripe Webhook', () => {
     )
   })
 
-  it('canceled を cancelled に変換する（綴りの違いを吸収する）', async () => {
+  // 回帰: Stripe の 'canceled'（終了済み）を綴り違いとして 'cancelled'
+  // （自動更新停止・期間内は利用可）に写していたため、経路によって status の
+  // 意味が変わっていた。以前のテストは Stripe には存在しない
+  // 「canceled かつ cancel_at_period_end: true」を前提にしていた
+  it('canceled は expired にする（Stripe の canceled は終了済み）', async () => {
     mockConstructEvent.mockReturnValue(
       createSubscriptionEvent('customer.subscription.updated', {
         status: 'canceled',
+        cancel_at_period_end: false,
+        ended_at: 1_754_000_000,
+      })
+    )
+
+    await handleStripeWebhook(createConfig(), createRequest())
+
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        subscription: expect.objectContaining({ status: 'expired' }),
+      })
+    )
+  })
+
+  // Stripe は「自動更新を止めただけ」を status: 'active' のまま
+  // cancel_at_period_end: true で表す。RevenueCat の CANCELLATION と同じ状態
+  it('active + cancel_at_period_end は cancelled にする', async () => {
+    mockConstructEvent.mockReturnValue(
+      createSubscriptionEvent('customer.subscription.updated', {
+        status: 'active',
         cancel_at_period_end: true,
       })
     )
@@ -273,7 +298,49 @@ describe('Stripe Webhook', () => {
         subscription: expect.objectContaining({
           status: 'cancelled',
           cancelAtPeriodEnd: true,
+          currentPeriodEnd: new Date(1_756_000_000 * 1000),
         }),
+      })
+    )
+  })
+
+  it('解約を取り消すと active に戻る', async () => {
+    mockConstructEvent.mockReturnValue(
+      createSubscriptionEvent('customer.subscription.updated', {
+        status: 'active',
+        cancel_at_period_end: false,
+      })
+    )
+
+    await handleStripeWebhook(createConfig(), createRequest())
+
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        subscription: expect.objectContaining({
+          status: 'active',
+          cancelAtPeriodEnd: false,
+        }),
+      })
+    )
+  })
+
+  // 猶予期間の判定を優先する。期間終了での解約が予約されていても、
+  // 支払い失敗中であることのほうが権利判定に効く
+  it('past_due は cancel_at_period_end が立っていても in_grace_period', async () => {
+    mockConstructEvent.mockReturnValue(
+      createSubscriptionEvent('customer.subscription.updated', {
+        status: 'past_due',
+        cancel_at_period_end: true,
+      })
+    )
+
+    await handleStripeWebhook(createConfig(), createRequest())
+
+    expect(mockApplySubscriptionEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        subscription: expect.objectContaining({ status: 'in_grace_period' }),
       })
     )
   })
