@@ -32,6 +32,8 @@ export type {
   ApplyStatus,
   DateLike,
   HttpResult,
+  NonRenewingPurchaseMode,
+  RevenueCatWebhookEvent,
   Subscription,
   SubscriptionEvent,
   SubscriptionSource,

@@ -1,7 +1,12 @@
 import type { Auth } from 'firebase-admin/auth'
 import type { Firestore } from 'firebase-admin/firestore'
 
-import type { Subscription, SubscriptionEvent } from './types.js'
+import type {
+  NonRenewingPurchaseMode,
+  RevenueCatWebhookEvent,
+  Subscription,
+  SubscriptionEvent,
+} from './types.js'
 
 /**
  * Stripe クライアントに要求する形。
@@ -126,6 +131,55 @@ export type BillingConfig = {
      * 本番の権利が付いてしまう。develop 環境の Functions でのみ true にする
      */
     allowSandbox?: boolean
+
+    /**
+     * NON_RENEWING_PURCHASE（消費型・単発購入）の扱い。既定は 'entitlement'。
+     *
+     * 既定では `active` として反映するが、単発購入のペイロードには期限が無く、
+     * 期限の無い `active` は isSubscriptionActive が無期限に有効と判定する。
+     * つまり消費型アイテム（1 回分のアンロック等）を RevenueCat で売っていると、
+     * 単発購入 1 件でプランの権利が永久に付く。
+     *
+     * 'ignore' にすると users/{uid}.subscription を変えずに 200 を返す。
+     * 単発購入と買い切りのプランを同じ Webhook で受けている場合は、関数を渡して
+     * `product_id` ごとに振り分ける。
+     *
+     * どちらの場合も onNonRenewingPurchase は呼ばれる
+     *
+     * ```ts
+     * nonRenewingPurchase: (event) =>
+     *   event.product_id === 'lifetime_pro' ? 'entitlement' : 'ignore'
+     * ```
+     */
+    nonRenewingPurchase?:
+      | NonRenewingPurchaseMode
+      | ((event: RevenueCatWebhookEvent) => NonRenewingPurchaseMode)
+
+    /**
+     * NON_RENEWING_PURCHASE を受け取るフック。単発購入をクレジットの付与など
+     * 別の処理に回すために使う（nonRenewingPurchase が 'entitlement' でも呼ばれる）。
+     *
+     * 認可（Authorization ヘッダー）・ペイロード検証・SANDBOX の判定を通った
+     * イベントだけが渡る。ここで例外を投げると Webhook は 503 を返し、
+     * RevenueCat に再送させる（'ignore' のときはこのフックが唯一の処理系なので、
+     * 失敗を握り潰すと購入が消えるため）。
+     *
+     * 権利への反映（'entitlement'）や nonRenewingPurchase の判定が例外で
+     * 失敗した場合は呼ばれない。Webhook が 5xx を返して再送されるので、
+     * 次の配信で最初からやり直す。
+     *
+     * **同じイベントで複数回呼ばれうる。** 再送のほか、'entitlement' 側の
+     * 冪等性判定（billing_events）はこのフックには効かない。付与を伴う処理は
+     * `context.eventId` で冪等にすること（`event.id` は欠けることがあるため、
+     * 無ければペイロードのハッシュで補ったものが入る）
+     */
+    onNonRenewingPurchase?: (
+      event: RevenueCatWebhookEvent,
+      context: {
+        /** このイベントの冪等性キー（billing_events のキーと同じ値） */
+        eventId: string
+      }
+    ) => Promise<void> | void
 
     /**
      * TRANSFER の移動先について、現在の権利を取り直すためのフック。
