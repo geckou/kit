@@ -4,27 +4,15 @@ import type { ResolvedConfig } from './config.js'
 import { assertRawBody } from './raw-body.js'
 import { mapRevenueCatStatus } from './status-mapping.js'
 import { applySubscriptionEvent } from './subscription.js'
-import type { HttpResult, WebhookRequest } from './types.js'
+import type {
+  HttpResult,
+  NonRenewingPurchaseMode,
+  RevenueCatWebhookEvent,
+  WebhookRequest,
+} from './types.js'
 
 // 外部入力なので、型はあくまで想定される形。実際の値は実行時に検証する
-type RevenueCatEvent = {
-  event: {
-    // 古い RevenueCat の設定では id が来ないことがある
-    id?: string
-    type: string
-    app_user_id: string
-    event_timestamp_ms?: number
-    expiration_at_ms?: number
-    /** BILLING_ISSUE のときの猶予期間終了。expiration_at_ms は元の期間終了（ほぼ今） */
-    grace_period_expiration_at_ms?: number
-    entitlement_ids?: string[]
-    environment?: string
-    /** TRANSFER で権利を失う側の app_user_id */
-    transferred_from?: string[]
-    /** TRANSFER で権利を受け取る側の app_user_id */
-    transferred_to?: string[]
-  }
-}
+type RevenueCatPayload = { event: RevenueCatWebhookEvent }
 
 /**
  * Firestore のドキュメント ID として使える文字列か。
@@ -80,7 +68,7 @@ function asFiniteNumber(value: unknown): number | null {
  * duplicate として捨てられてしまう。ペイロード全体のハッシュなら
  * 再送では同じ値、別イベントでは別の値になる。
  */
-function buildEventId(event: RevenueCatEvent['event']): string {
+function buildEventId(event: RevenueCatWebhookEvent): string {
   if (typeof event.id === 'string' && event.id !== '') return event.id
 
   return crypto.createHash('sha256').update(JSON.stringify(event)).digest('hex')
@@ -104,6 +92,30 @@ function verifyAuthorization(
 }
 
 /**
+ * NON_RENEWING_PURCHASE（消費型・単発購入）をどう扱うか決める（→ config.revenuecat）。
+ *
+ * 未設定なら従来どおり 'entitlement'。関数が想定外の値を返した場合は
+ * 'ignore' に倒す（期限の無い active は無期限の権利になるため、
+ * 誤って与えるより与えないほうが被害が小さい）
+ */
+function resolveNonRenewingMode(
+  config: ResolvedConfig,
+  event: RevenueCatWebhookEvent
+): NonRenewingPurchaseMode {
+  const option = config.revenuecat?.nonRenewingPurchase ?? 'entitlement'
+  const mode = typeof option === 'function' ? option(event) : option
+
+  if (mode !== 'entitlement' && mode !== 'ignore') {
+    console.warn(
+      `Unknown revenuecat.nonRenewingPurchase value: ${String(mode)}; ignoring the purchase`
+    )
+    return 'ignore'
+  }
+
+  return mode
+}
+
+/**
  * TRANSFER（権利が別の app_user_id へ移った）を処理する。
  *
  * 元のユーザーを expired にしないと active が残り続ける。
@@ -115,7 +127,7 @@ function verifyAuthorization(
  */
 async function handleTransfer(
   config: ResolvedConfig,
-  event: RevenueCatEvent['event']
+  event: RevenueCatWebhookEvent
 ): Promise<HttpResult> {
   const eventId = buildEventId(event)
   const occurredAtMs = asFiniteNumber(event.event_timestamp_ms)
@@ -239,7 +251,7 @@ export async function handleRevenueCatWebhook(
   }
 
   // 外部入力のため、パース失敗・想定外の形は 400 で返す
-  let parsed: RevenueCatEvent
+  let parsed: RevenueCatPayload
   try {
     parsed = JSON.parse(req.rawBody.toString('utf-8'))
   } catch {
@@ -299,33 +311,64 @@ export async function handleRevenueCatWebhook(
     ? event.entitlement_ids.find((id) => typeof id === 'string')
     : undefined
 
+  const isNonRenewing = event.type === 'NON_RENEWING_PURCHASE'
+  let effectsPending = false
+
   try {
-    const result = await applySubscriptionEvent(config, {
-      eventId,
-      source: 'revenuecat',
-      uid: event.app_user_id,
-      // 時刻が無ければ受信時刻で代用する（順序制御の基準として使う）
-      occurredAt: occurredAtMs !== null ? new Date(occurredAtMs) : new Date(),
-      subscription: {
-        status,
+    // 単発購入は期限を持たないため、active として反映すると権利が永久に付く。
+    // 'ignore' なら users/{uid}.subscription を変えない（→ config.revenuecat）
+    if (isNonRenewing && resolveNonRenewingMode(config, event) === 'ignore') {
+      console.log(
+        `Ignored RevenueCat NON_RENEWING_PURCHASE (${event.app_user_id}): nonRenewingPurchase is 'ignore'`
+      )
+    } else {
+      const result = await applySubscriptionEvent(config, {
+        eventId,
         source: 'revenuecat',
-        planId,
-        currentPeriodEnd:
-          expirationMs !== null ? new Date(expirationMs) : undefined,
-        cancelAtPeriodEnd: status === 'cancelled',
-      },
-    })
+        uid: event.app_user_id,
+        // 時刻が無ければ受信時刻で代用する（順序制御の基準として使う）
+        occurredAt: occurredAtMs !== null ? new Date(occurredAtMs) : new Date(),
+        subscription: {
+          status,
+          source: 'revenuecat',
+          planId,
+          currentPeriodEnd:
+            expirationMs !== null ? new Date(expirationMs) : undefined,
+          cancelAtPeriodEnd: status === 'cancelled',
+        },
+      })
 
-    if (result.status !== 'applied') {
-      console.log(`RevenueCat event ${eventId} skipped: ${result.status}`)
-    }
+      if (result.status !== 'applied') {
+        console.log(`RevenueCat event ${eventId} skipped: ${result.status}`)
+      }
 
-    if (result.effectsPending) {
-      return effectsPendingResult()
+      effectsPending = result.effectsPending
     }
   } catch (error) {
     console.error('Failed to process RevenueCat webhook', error)
     return { status: 500, body: { error: 'Internal error' } }
+  }
+
+  // 単発購入を別の処理（クレジット付与等）に回すためのフック。
+  // 権利として反映したかどうかに関わらず、検証を通ったイベントだけを渡す
+  const onNonRenewingPurchase = config.revenuecat?.onNonRenewingPurchase
+
+  if (isNonRenewing && onNonRenewingPurchase) {
+    try {
+      await onNonRenewingPurchase(event)
+    } catch (error) {
+      // 'ignore' のときはこのフックが唯一の処理系。200 を返すと再送されず、
+      // 購入がどこにも残らないため 5xx で再送させる
+      console.error(
+        'RevenueCat onNonRenewingPurchase failed; asking for a retry',
+        error
+      )
+      return { status: 503, body: { error: 'Handler failed' } }
+    }
+  }
+
+  if (effectsPending) {
+    return effectsPendingResult()
   }
 
   return { status: 200, body: { received: true } }

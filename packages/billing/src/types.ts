@@ -40,6 +40,41 @@ export type Subscription = {
   lastEventSequence?: number
 }
 
+/**
+ * RevenueCat の Webhook ペイロードの `event`。
+ *
+ * 外部入力なので、型はあくまで想定される形。実際の値は実行時に検証する。
+ * `revenuecat.nonRenewingPurchase` / `revenuecat.onNonRenewingPurchase` に
+ * そのまま渡すため公開している（product_id など、ここに無いフィールドも
+ * 実際には乗ってくる）
+ */
+export type RevenueCatWebhookEvent = {
+  /** 古い RevenueCat の設定では id が来ないことがある */
+  id?: string
+  type: string
+  app_user_id: string
+  event_timestamp_ms?: number
+  expiration_at_ms?: number
+  /** BILLING_ISSUE のときの猶予期間終了。expiration_at_ms は元の期間終了（ほぼ今） */
+  grace_period_expiration_at_ms?: number
+  entitlement_ids?: string[]
+  environment?: string
+  /** TRANSFER で権利を失う側の app_user_id */
+  transferred_from?: string[]
+  /** TRANSFER で権利を受け取る側の app_user_id */
+  transferred_to?: string[]
+  /** 上記以外のフィールド（product_id / price 等）もそのまま渡る */
+  [key: string]: unknown
+}
+
+/**
+ * NON_RENEWING_PURCHASE（消費型・単発購入）の扱い。
+ *
+ * - entitlement 従来どおり `active` として `users/{uid}.subscription` に反映する
+ * - ignore     権利状態を変えない（別処理は onNonRenewingPurchase で受け取る）
+ */
+export type NonRenewingPurchaseMode = 'entitlement' | 'ignore'
+
 /** Webhook から渡される、経路非依存に正規化済みのイベント */
 export type SubscriptionEvent = {
   /** プロバイダ側のイベント ID（冪等性キー） */

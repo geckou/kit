@@ -117,6 +117,40 @@ revenuecat: {
 移動先の取得に失敗しても Webhook は 200 を返す（移動元の失効は確定させたいため）。
 未設定なら警告のみで、従来どおり後続イベント待ちになる。
 
+### 単発購入（NON_RENEWING_PURCHASE）
+
+`NON_RENEWING_PURCHASE` は既定で `active` として反映する。ただし**単発購入の
+ペイロードには期限が無く、期限の無い `active` は `isSubscriptionActive` が
+無期限に有効と判定する**。消費型・単発のアイテム（1 回分のアンロック等）を
+RevenueCat で売っていると、単発購入 1 件でプランの権利が永久に付く。
+
+`nonRenewingPurchase: 'ignore'` にすると `users/{uid}.subscription` を変えずに
+200 を返す。単発購入と買い切りプランを同じ Webhook で受けているなら、関数を渡して
+`product_id` ごとに振り分ける（関数が想定外の値を返した場合は `'ignore'` に倒す）。
+
+```ts
+revenuecat: {
+  webhookAuth: process.env.REVENUECAT_WEBHOOK_AUTH!,
+  // 'entitlement'（既定・従来どおり）/ 'ignore' / イベントを見て決める関数
+  nonRenewingPurchase: (event) =>
+    event.product_id === 'lifetime_pro' ? 'entitlement' : 'ignore',
+  // 単発購入を別の処理（クレジット付与等）に回す
+  onNonRenewingPurchase: async (event) => {
+    await grantCredits(event.app_user_id, event)
+  },
+}
+```
+
+`onNonRenewingPurchase` は `nonRenewingPurchase` の指定とは独立に、認可
+（Authorization ヘッダー）・ペイロード検証・`SANDBOX` の判定を通った
+`NON_RENEWING_PURCHASE` で必ず呼ばれる。ここで例外を投げると Webhook は 503 を返し、
+RevenueCat に再送させる（`'ignore'` のときはこのフックが唯一の処理系なので、
+失敗を握り潰すと購入がどこにも残らないため）。
+
+⚠️ **同じイベントで複数回呼ばれうる。** `'ignore'` のイベントは `billing_events` に
+記録しない（＝冪等性の判定に載らない）ため、再送はそのまま再実行になる。
+付与を伴う処理は `event.id` で冪等にすること。
+
 **`app_user_id` は Firebase の uid にすること。** Webhook が書き込む先は
 `users/{app_user_id}` で、`Purchases.logIn(uid)` していない匿名 ID のままだと
 `users/$RCAnonymousID:...` が作られ、そのユーザーの権利はどこからも参照されない。
@@ -250,6 +284,9 @@ IAP の購入画面側でも権利を確認すること。
 > マージした時点で npm に公開される（→ `.github/workflows/publish.yml`）ため、
 > リリースの判断と一緒に上げること。
 
+- RevenueCat の `nonRenewingPurchase` / `onNonRenewingPurchase` が増えた
+  （→「単発購入（NON_RENEWING_PURCHASE）」）。既定は従来どおり `'entitlement'` なので
+  設定しなければ挙動は変わらない
 - `mapStripeStatus` が第 2 引数 `{ cancelAtPeriodEnd }` を受け取るようになった
   （省略可。既存の呼び出しはそのまま動く）
 - Stripe の `canceled` が `cancelled` ではなく `expired` になった。
