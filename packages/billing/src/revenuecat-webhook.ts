@@ -308,7 +308,7 @@ export async function handleRevenueCatWebhook(
     asFiniteNumber(event.grace_period_expiration_at_ms) ??
     asFiniteNumber(event.expiration_at_ms)
   const planId = Array.isArray(event.entitlement_ids)
-    ? event.entitlement_ids.find((id) => typeof id === 'string')
+    ? event.entitlement_ids.find((id): id is string => typeof id === 'string')
     : undefined
 
   const isNonRenewing = event.type === 'NON_RENEWING_PURCHASE'
@@ -350,12 +350,14 @@ export async function handleRevenueCatWebhook(
   }
 
   // 単発購入を別の処理（クレジット付与等）に回すためのフック。
-  // 権利として反映したかどうかに関わらず、検証を通ったイベントだけを渡す
+  // 'ignore' で権利に反映しなかった場合も呼ぶ。
+  // event.id は欠けることがあるので、冪等性キーには解決済みの eventId を渡す
+  // （パッケージが billing_events のキーに使っているものと同じ値）
   const onNonRenewingPurchase = config.revenuecat?.onNonRenewingPurchase
 
   if (isNonRenewing && onNonRenewingPurchase) {
     try {
-      await onNonRenewingPurchase(event)
+      await onNonRenewingPurchase(event, { eventId })
     } catch (error) {
       // 'ignore' のときはこのフックが唯一の処理系。200 を返すと再送されず、
       // 購入がどこにも残らないため 5xx で再送させる

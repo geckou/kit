@@ -137,11 +137,14 @@ describe('NON_RENEWING_PURCHASE の扱い', () => {
     logSpy.mockRestore()
   })
 
-  it('関数が例外を投げたら 500 を返して再送させる（権利は付けない）', async () => {
+  // 判定が失敗した時点で扱いが決まらない。再送で最初からやり直す
+  it('関数が例外を投げたら 500 を返して再送させる（権利もフックも動かさない）', async () => {
+    const onNonRenewingPurchase = vi.fn()
     const config = createConfig({
       nonRenewingPurchase: () => {
         throw new Error('lookup failed')
       },
+      onNonRenewingPurchase,
     })
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -152,6 +155,7 @@ describe('NON_RENEWING_PURCHASE の扱い', () => {
 
     expect(result.status).toBe(500)
     expect(config.store.get('users/user-1')).toBeUndefined()
+    expect(onNonRenewingPurchase).not.toHaveBeenCalled()
 
     errorSpy.mockRestore()
   })
@@ -190,7 +194,8 @@ describe('NON_RENEWING_PURCHASE の扱い', () => {
           type: 'NON_RENEWING_PURCHASE',
           app_user_id: 'user-1',
           product_id: 'single_unlock',
-        })
+        }),
+        { eventId: 'rc_evt_1' }
       )
 
       errorSpy.mockRestore()
@@ -257,6 +262,34 @@ describe('NON_RENEWING_PURCHASE の扱い', () => {
       await handleRevenueCatWebhook(config, createRequest('INITIAL_PURCHASE'))
 
       expect(onNonRenewingPurchase).not.toHaveBeenCalled()
+    })
+
+    // event.id は古い設定だと来ない。利用側が冪等にできるよう、
+    // パッケージが billing_events に使うキーと同じ値を渡す
+    it('event.id が無くても冪等性キーを渡す（再送では同じ値）', async () => {
+      const onNonRenewingPurchase = vi.fn()
+      const send = async () => {
+        const config = createConfig({
+          nonRenewingPurchase: 'ignore',
+          onNonRenewingPurchase,
+        })
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+        await handleRevenueCatWebhook(
+          config,
+          createRequest('NON_RENEWING_PURCHASE', { id: undefined })
+        )
+
+        logSpy.mockRestore()
+      }
+
+      await send()
+      await send()
+
+      const [first, second] = onNonRenewingPurchase.mock.calls
+      expect(first[1].eventId).toEqual(expect.any(String))
+      expect(first[1].eventId).not.toBe('')
+      expect(first[1].eventId).toBe(second[1].eventId)
     })
 
     // 'ignore' のときはこのフックが唯一の処理系。200 を返すと再送されず、

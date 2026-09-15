@@ -157,19 +157,28 @@ export type BillingConfig = {
 
     /**
      * NON_RENEWING_PURCHASE を受け取るフック。単発購入をクレジットの付与など
-     * 別の処理に回すために使う（nonRenewingPurchase の指定とは独立に呼ばれる）。
+     * 別の処理に回すために使う（nonRenewingPurchase が 'entitlement' でも呼ばれる）。
      *
      * 認可（Authorization ヘッダー）・ペイロード検証・SANDBOX の判定を通った
      * イベントだけが渡る。ここで例外を投げると Webhook は 503 を返し、
      * RevenueCat に再送させる（'ignore' のときはこのフックが唯一の処理系なので、
      * 失敗を握り潰すと購入が消えるため）。
      *
+     * 権利への反映（'entitlement'）や nonRenewingPurchase の判定が例外で
+     * 失敗した場合は呼ばれない。Webhook が 5xx を返して再送されるので、
+     * 次の配信で最初からやり直す。
+     *
      * **同じイベントで複数回呼ばれうる。** 再送のほか、'entitlement' 側の
      * 冪等性判定（billing_events）はこのフックには効かない。付与を伴う処理は
-     * `event.id` で冪等にすること
+     * `context.eventId` で冪等にすること（`event.id` は欠けることがあるため、
+     * 無ければペイロードのハッシュで補ったものが入る）
      */
     onNonRenewingPurchase?: (
-      event: RevenueCatWebhookEvent
+      event: RevenueCatWebhookEvent,
+      context: {
+        /** このイベントの冪等性キー（billing_events のキーと同じ値） */
+        eventId: string
+      }
     ) => Promise<void> | void
 
     /**

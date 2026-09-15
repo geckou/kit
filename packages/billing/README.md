@@ -135,21 +135,28 @@ revenuecat: {
   nonRenewingPurchase: (event) =>
     event.product_id === 'lifetime_pro' ? 'entitlement' : 'ignore',
   // 単発購入を別の処理（クレジット付与等）に回す
-  onNonRenewingPurchase: async (event) => {
-    await grantCredits(event.app_user_id, event)
+  onNonRenewingPurchase: async (event, { eventId }) => {
+    await grantCredits(event.app_user_id, { key: eventId })
   },
 }
 ```
 
-`onNonRenewingPurchase` は `nonRenewingPurchase` の指定とは独立に、認可
-（Authorization ヘッダー）・ペイロード検証・`SANDBOX` の判定を通った
-`NON_RENEWING_PURCHASE` で必ず呼ばれる。ここで例外を投げると Webhook は 503 を返し、
+`onNonRenewingPurchase` は `nonRenewingPurchase` が `'entitlement'` でも呼ばれる。
+渡るのは認可（Authorization ヘッダー）・ペイロード検証・`SANDBOX` の判定を通った
+`NON_RENEWING_PURCHASE` だけ。ここで例外を投げると Webhook は 503 を返し、
 RevenueCat に再送させる（`'ignore'` のときはこのフックが唯一の処理系なので、
-失敗を握り潰すと購入がどこにも残らないため）。
+失敗を握り潰すと購入がどこにも残らないため）。権利への反映や
+`nonRenewingPurchase` の判定が例外で失敗した場合は呼ばない（5xx で再送され、
+次の配信で最初からやり直す）。
 
 ⚠️ **同じイベントで複数回呼ばれうる。** `'ignore'` のイベントは `billing_events` に
 記録しない（＝冪等性の判定に載らない）ため、再送はそのまま再実行になる。
-付与を伴う処理は `event.id` で冪等にすること。
+付与を伴う処理は第 2 引数の `eventId` で冪等にすること（`event.id` は古い設定だと
+来ないので、無ければペイロードのハッシュで補った値が入る）。
+
+⚠️ **`event` は JSON をパースしたそのままの値。** `type` と `app_user_id` 以外は
+検証していないので型は `unknown`。`product_id` や `event_timestamp_ms` を使うときは
+`typeof` / `Array.isArray` で絞ること。
 
 **`app_user_id` は Firebase の uid にすること。** Webhook が書き込む先は
 `users/{app_user_id}` で、`Purchases.logIn(uid)` していない匿名 ID のままだと

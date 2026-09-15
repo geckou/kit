@@ -41,28 +41,41 @@ export type Subscription = {
 }
 
 /**
- * RevenueCat の Webhook ペイロードの `event`。
+ * RevenueCat の Webhook ペイロードの `event`。JSON をパースしたそのままの値。
  *
- * 外部入力なので、型はあくまで想定される形。実際の値は実行時に検証する。
  * `revenuecat.nonRenewingPurchase` / `revenuecat.onNonRenewingPurchase` に
- * そのまま渡すため公開している（product_id など、ここに無いフィールドも
- * 実際には乗ってくる）
+ * そのまま渡すため公開している（`product_id` など、ここに挙げていない
+ * フィールドも実際には乗ってくる）。
+ *
+ * **`type` と `app_user_id` 以外は検証していないので `unknown`。** 外部入力を
+ * `number` や `string[]` と名乗らせると、実際には文字列や null が入ってきた
+ * ときに利用側が気付けない（例: `event_timestamp_ms` が文字列でも、パッケージが
+ * 正規化するのは内部の複製だけ）。使う前に typeof / Array.isArray で絞ること
  */
 export type RevenueCatWebhookEvent = {
-  /** 古い RevenueCat の設定では id が来ないことがある */
-  id?: string
+  /** 検証済み（イベント種別） */
   type: string
+  /** 検証済み（空でない、ドキュメント ID にできる文字列） */
   app_user_id: string
-  event_timestamp_ms?: number
-  expiration_at_ms?: number
-  /** BILLING_ISSUE のときの猶予期間終了。expiration_at_ms は元の期間終了（ほぼ今） */
-  grace_period_expiration_at_ms?: number
-  entitlement_ids?: string[]
-  environment?: string
-  /** TRANSFER で権利を失う側の app_user_id */
-  transferred_from?: string[]
-  /** TRANSFER で権利を受け取る側の app_user_id */
-  transferred_to?: string[]
+  /** 想定は string。古い RevenueCat の設定では来ないことがある */
+  id?: unknown
+  /** 想定は number（ミリ秒） */
+  event_timestamp_ms?: unknown
+  /** 想定は number（ミリ秒） */
+  expiration_at_ms?: unknown
+  /**
+   * 想定は number（ミリ秒）。BILLING_ISSUE のときの猶予期間終了。
+   * expiration_at_ms は元の期間終了（ほぼ今）
+   */
+  grace_period_expiration_at_ms?: unknown
+  /** 想定は string[] */
+  entitlement_ids?: unknown
+  /** 想定は string（'SANDBOX' | 'PRODUCTION'） */
+  environment?: unknown
+  /** 想定は string[]。TRANSFER で権利を失う側の app_user_id */
+  transferred_from?: unknown
+  /** 想定は string[]。TRANSFER で権利を受け取る側の app_user_id */
+  transferred_to?: unknown
   /** 上記以外のフィールド（product_id / price 等）もそのまま渡る */
   [key: string]: unknown
 }
