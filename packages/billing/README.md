@@ -285,11 +285,7 @@ import type { Subscription } from '@geckou/billing/entitlement'
 していない（`Subscription` の形が変わるため）。両経路の購入を UI から防ぎたい場合は、
 IAP の購入画面側でも権利を確認すること。
 
-### 0.8.0 の変更（version 未反映）
-
-> `packages/billing/package.json` の version はまだ 0.7.0。上げた PR を production へ
-> マージした時点で npm に公開される（→ `.github/workflows/publish.yml`）ため、
-> リリースの判断と一緒に上げること。
+### 0.8.0 の変更
 
 - RevenueCat の `nonRenewingPurchase` / `onNonRenewingPurchase` が増えた
   （→「単発購入（NON_RENEWING_PURCHASE）」）。既定は従来どおり `'entitlement'` なので
