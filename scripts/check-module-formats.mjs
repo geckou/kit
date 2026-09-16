@@ -1,19 +1,24 @@
 #!/usr/bin/env node
 //
-// 公開する dist が exports の条件どおりの形式になっているかを検査する。
+// **このファイルの正は geckou/project-starter/scripts/check-module-formats.mjs。**
+// geckou/kit にも同じものがある。直すときはまずここを直してから配ること。
 //
-//   node scripts/check-module-formats.mjs        # 全パッケージ（先に yarn build）
+// 公開（配布）する dist が exports の条件どおりの形式になっているかを検査する。
 //
-// **なぜ必要か**: `import` 条件が無い CJS のみのパッケージを ESM のアプリから使うと、
-// パッケージが require した firebase SDK とアプリが import した firebase SDK が
-// 別インスタンスになり、instanceof の検査で弾かれて Firestore への通信が一切できない
-// （geckou/kit#66）。exports に条件を足しても、出力が実際に ESM になっていなければ
-// 同じことが起きる。型チェックにもテストにも引っかからないので、ここで機械的に落とす。
+//   node scripts/check-module-formats.mjs        # 先に yarn build
+//
+// **なぜ必要か**: CJS だけを配るパッケージを ESM のアプリから使うと、パッケージが
+// require した firebase SDK とアプリが import した firebase SDK が別インスタンスになり、
+// instanceof の検査で弾かれて Firestore への通信が一切できない（geckou/kit#66）。
+// exports に import 条件を足しても、出力が実際に ESM になっていなければ同じことが起きる。
+// 型チェックにもテストにも引っかからないので、ここで機械的に落とす。
 //
 // 見るのは 3 つ。
-//   1. import 条件の JS が本当に ESM か（dist/esm/package.json の "type": "module" 込み）
+//   1. import 条件の JS が本当に ESM か（出力先の package.json の "type": "module" 込み）
 //   2. require 条件の JS が本当に CJS か
 //   3. 条件が指すファイル（JS・型定義）が実在するか
+//
+// dist を指す条件を持たないパッケージ（設定だけを配る packages/*-config 等）は対象外。
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -53,8 +58,10 @@ function isEsmSource(source) {
   return /^\s*(import|export)\s/m.test(source)
 }
 
+// CJS は「ESM の構文を持たないこと」で見る。require も exports. も現れない
+// 出力（型だけのモジュール等）があるため、その 2 つの有無では判定できない
 function isCjsSource(source) {
-  return /\brequire\(|\bexports\./.test(source) && !/^\s*import\s/m.test(source)
+  return !isEsmSource(source)
 }
 
 // Node は最も近い package.json の "type" で .js を解釈する。
@@ -85,6 +92,15 @@ function checkPackage(packageDirectory) {
   const targets = []
 
   collectTargets(manifest.exports, [], targets)
+
+  // dist を配らないパッケージ（設定だけのもの）はビルド生成物を持たないので見ない
+  if (!targets.some(({ target }) => target.startsWith('./dist/'))) return
+
+  if (!fs.existsSync(path.join(packageDirectory, 'dist'))) {
+    report(`${name}: dist がありません（先に yarn build を実行してください）`)
+
+    return
+  }
 
   for (const { target, conditions } of targets) {
     if (!target.startsWith('./')) continue
@@ -125,18 +141,11 @@ const packageDirectories = fs
   .filter((directory) => fs.existsSync(path.join(directory, 'package.json')))
 
 for (const packageDirectory of packageDirectories) {
-  if (!fs.existsSync(path.join(packageDirectory, 'dist'))) {
-    report(
-      `${path.basename(packageDirectory)}: dist がありません（先に yarn build を実行してください）`
-    )
-    continue
-  }
-
   checkPackage(packageDirectory)
 }
 
 if (problems.length > 0) {
-  console.error('❌ 公開物の形式が exports の条件と合っていません:')
+  console.error('❌ 配布物の形式が exports の条件と合っていません:')
 
   for (const problem of problems) {
     console.error(`  - ${problem}`)
@@ -145,4 +154,4 @@ if (problems.length > 0) {
   process.exit(1)
 }
 
-console.log('✅ exports の条件と公開物の形式（ESM / CJS）が一致しています')
+console.log('✅ exports の条件と配布物の形式（ESM / CJS）が一致しています')

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
+#
+# **このファイルの正は geckou/project-starter/scripts/emit-esm-package-json.sh。**
+# geckou/kit にも同じものがある。直すときはまずここを直してから配ること。
+#
 # ESM ビルドの出力先に {"type": "module"} だけの package.json を置く。
 #
-# パッケージ本体は "type": "commonjs"（既存の利用側が require できる形を保つ）。
+# パッケージ本体は CommonJS（既存の利用側が require できる形を保つ）。
 # ESM の出力を .js のまま同じツリーに置くと Node もバンドラも CJS として読むため、
 # 出力先にだけ type を上書きする package.json を置いて ESM だと知らせる。
 #
