@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # **このファイルの正は geckou/project-starter/scripts/test-module-formats.sh。**
-# geckou/kit にも同じものがある。直すときはまずそちらを直してから配ること
+# geckou/kit にも同じものがあるが、直すときはまずここを直してから配ること
 # （2 リポジトリで中身が同じであることを前提にしている）。
 #
 # scripts/check-module-formats.mjs の回帰テスト。

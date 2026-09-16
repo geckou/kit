@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 //
 // **このファイルの正は geckou/project-starter/scripts/check-module-formats.mjs。**
-// geckou/kit にも同じものがある。直すときはまずそちらを直してから配ること
+// geckou/kit にも同じものがあるが、直すときはまずここを直してから配ること
 // （2 リポジトリで中身が同じであることを前提にしている）。
 //
 // packages/* の公開物が package.json の exports の条件どおりの形式（ESM / CJS）に

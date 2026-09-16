@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # **このファイルの正は geckou/project-starter/scripts/emit-esm-package-json.sh。**
-# geckou/kit にも同じものがある。直すときはまずそちらを直してから配ること
+# geckou/kit にも同じものがあるが、直すときはまずここを直してから配ること
 # （2 リポジトリで中身が同じであることを前提にしている）。
 #
 # ESM ビルドの出力先に {"type": "module"} だけの package.json を置く。
