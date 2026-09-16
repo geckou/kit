@@ -1,0 +1,12 @@
+{
+  // CJS 用の tsconfig.json と対になる ESM ビルド。出力先は dist/esm。
+  // src の package.json が "type": "commonjs" のため nodenext のままでは
+  // CJS しか出せない。テストの型チェック（tsconfig.test.json）と同じく
+  // esnext + bundler にして ESM を出す
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "outDir": "dist/esm"
+  }
+}

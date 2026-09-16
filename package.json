@@ -18,6 +18,7 @@
   "scripts": {
     "build": "yarn workspaces run build",
     "check:optional-peer-types": "bash scripts/check-optional-peer-types.sh",
+    "check:module-formats": "node scripts/check-module-formats.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "yarn workspaces run lint",

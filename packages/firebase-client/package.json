@@ -1,22 +1,52 @@
 {
   "name": "@geckou/firebase-client",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Firebase client SDK wrappers (app init / Firestore CRUD / Storage) for web and React Native",
   "type": "commonjs",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "default": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     },
     "./firestore": {
-      "types": "./dist/firestore.d.ts",
-      "default": "./dist/firestore.js"
+      "import": {
+        "types": "./dist/esm/firestore.d.ts",
+        "default": "./dist/esm/firestore.js"
+      },
+      "require": {
+        "types": "./dist/firestore.d.ts",
+        "default": "./dist/firestore.js"
+      },
+      "default": {
+        "types": "./dist/firestore.d.ts",
+        "default": "./dist/firestore.js"
+      }
     },
     "./storage": {
-      "types": "./dist/storage.d.ts",
-      "default": "./dist/storage.js"
+      "import": {
+        "types": "./dist/esm/storage.d.ts",
+        "default": "./dist/esm/storage.js"
+      },
+      "require": {
+        "types": "./dist/storage.d.ts",
+        "default": "./dist/storage.js"
+      },
+      "default": {
+        "types": "./dist/storage.d.ts",
+        "default": "./dist/storage.js"
+      }
     },
     "./package.json": "./package.json"
   },
@@ -40,7 +70,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json && bash ../../scripts/emit-esm-package-json.sh dist/esm",
     "type-check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",

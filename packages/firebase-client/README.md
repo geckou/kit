@@ -9,6 +9,20 @@ Firebase クライアント SDK の薄いラッパー。アプリの初期化・
 各モジュールは `'use client'` を持つ。Next.js App Router のサーバーコンポーネントから
 直接 import するとビルドエラーになるので、クライアントコンポーネント経由で使う。
 
+## 配布形式（ESM / CJS）
+
+`import` すると ESM（`dist/esm/`）、`require` すると CJS（`dist/`）が読まれる。
+
+**ESM のビルドが要るのは、利用側と firebase SDK の実体を揃えるため。** このパッケージが
+`require('firebase/firestore')` で掴む実装と、アプリが `import` で掴む実装は、firebase 側の
+`exports` の条件分岐によって別物になる。firebase は `db` / `auth` を instanceof で検査するため、
+CJS で作った `db` を ESM 側の `doc()` に渡すと `Expected first argument to collection() to be
+a CollectionReference, a DocumentReference or Firebase Firestore` で弾かれる（#66）。
+
+そのため、`initFirebase` が返した `app` / `auth` / `db` は、アプリが直接 import した
+`firebase/auth`・`firebase/firestore` の API（`runTransaction`・`writeBatch` など、
+ラッパーが持たないもの）にそのまま渡せる。
+
 ## インストール
 
 ```bash
