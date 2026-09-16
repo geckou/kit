@@ -31,6 +31,11 @@ jobs:
       - name: Release Command Test
         run: bash scripts/test-release-command.sh
 
+      # 公開物の形式検査（下の Check module formats）自身の回帰テスト。
+      # 偽の packages/ を組み立てて動かすだけなので依存インストールは要らない
+      - name: Module Format Check Test
+        run: bash scripts/test-module-formats.sh
+
       - run: yarn install --frozen-lockfile
 
       - name: Lint
